@@ -1,0 +1,37 @@
+{
+  "type": "capsule:capsule",
+  "conditions": [
+    {
+      "type": "capsule:is_enabled",
+      "property": "obsidianCapsuleSize"
+    }
+  ],
+  "result": {
+    "type": "minecraft:item_nbt",
+    "item": "capsule:capsule",
+    "data": 0,
+    "nbt": {
+      "color": 1972267,
+      "size": 9
+    }
+  },
+  "pattern": [
+    " b ",
+    "#e#",
+    " i "
+  ],
+  "key": {
+    "#": {
+      "item": "minecraft:obsidian"
+    },
+    "b": {
+      "item": "minecraft:stone_button"
+    },
+    "e": {
+      "item": "minecraft:ender_pearl"
+    },
+    "i": {
+      "item": "minecraft:iron_ingot"
+    }
+  }
+}

@@ -35,7 +35,7 @@ public class CapsuleContentPreviewQueryToServer implements IMessage {
         try {
             // these methods may also be of use for your code:
             // for Itemstacks - ByteBufUtils.readItemStack()
-            // for NBT tags ByteBufUtils.readTag();
+            // for MinecraftNBT tags ByteBufUtils.readTag();
             // for Strings: ByteBufUtils.readUTF8String();
             this.setStructureName(ByteBufUtils.readUTF8String(buf));
 
@@ -57,7 +57,7 @@ public class CapsuleContentPreviewQueryToServer implements IMessage {
 
         // these methods may also be of use for your code:
         // for Itemstacks - ByteBufUtils.writeItemStack()
-        // for NBT tags ByteBufUtils.writeTag();
+        // for MinecraftNBT tags ByteBufUtils.writeTag();
         // for Strings: ByteBufUtils.writeUTF8String();
         ByteBufUtils.writeUTF8String(buf, this.getStructureName());
     }
@@ -68,7 +68,7 @@ public class CapsuleContentPreviewQueryToServer implements IMessage {
 
     @Override
     public String toString() {
-        return "CapsuleContentPreviewMessageToClient";
+        return getClass().toString();
     }
 
     public String getStructureName() {

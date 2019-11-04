@@ -39,7 +39,7 @@ public class LabelEditedMessageToServer implements IMessage {
 
             // these methods may also be of use for your code:
             // for Itemstacks - ByteBufUtils.readItemStack()
-            // for NBT tags ByteBufUtils.readTag();
+            // for MinecraftNBT tags ByteBufUtils.readTag();
             // for Strings: ByteBufUtils.readUTF8String();
 
         } catch (IndexOutOfBoundsException ioe) {
@@ -64,13 +64,13 @@ public class LabelEditedMessageToServer implements IMessage {
 
         // these methods may also be of use for your code:
         // for Itemstacks - ByteBufUtils.writeItemStack()
-        // for NBT tags ByteBufUtils.writeTag();
+        // for MinecraftNBT tags ByteBufUtils.writeTag();
         // for Strings: ByteBufUtils.writeUTF8String();
     }
 
     @Override
     public String toString() {
-        return "CapsuleLabelEditedMessageToClient[label=" + String.valueOf(getLabel()) + "]";
+        return getClass().toString() + "[label=" + getLabel() + "]";
     }
 
     public boolean isMessageValid() {

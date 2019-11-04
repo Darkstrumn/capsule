@@ -1,4 +1,11 @@
 {
+  "type": "capsule:capsule",
+  "conditions": [
+    {
+      "type": "capsule:is_enabled",
+      "property": "opCapsuleSize"
+    }
+  ],
   "result": {
     "type": "minecraft:item_nbt",
     "item": "capsule:capsule",
@@ -14,7 +21,6 @@
     "#e#",
     " i "
   ],
-  "type": "forge:ore_shaped",
   "key": {
     "#": {
       "item": "minecraft:iron_ingot"

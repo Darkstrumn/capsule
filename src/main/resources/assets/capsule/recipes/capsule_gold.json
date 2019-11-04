@@ -1,11 +1,18 @@
 {
+  "type": "capsule:capsule",
+  "conditions": [
+    {
+      "type": "capsule:is_enabled",
+      "property": "goldCapsuleSize"
+    }
+  ],
   "result": {
     "type": "minecraft:item_nbt",
     "item": "capsule:capsule",
     "data": 0,
     "nbt": {
       "color": 16766720,
-      "size": 3
+      "size": 5
     }
   },
   "pattern": [
@@ -13,7 +20,6 @@
     "#e#",
     " i "
   ],
-  "type": "forge:ore_shaped",
   "key": {
     "#": {
       "item": "minecraft:gold_ingot"

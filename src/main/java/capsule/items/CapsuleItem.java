@@ -1,37 +1,51 @@
 package capsule.items;
 
-import capsule.*;
-import capsule.blocks.BlockCapsuleMarker;
+import capsule.CommonProxy;
+import capsule.Config;
+import capsule.Main;
+import capsule.StructureSaver;
+import capsule.client.CapsulePreviewHandler;
+import capsule.helpers.Capsule;
+import capsule.helpers.MinecraftNBT;
+import capsule.helpers.Spacial;
 import capsule.network.CapsuleContentPreviewQueryToServer;
+import capsule.network.CapsuleLeftClickQueryToServer;
 import capsule.network.CapsuleThrowQueryToServer;
-import joptsimple.internal.Strings;
 import net.minecraft.block.Block;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.util.ITooltipFlag;
 import net.minecraft.creativetab.CreativeTabs;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.item.EntityItem;
 import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.init.SoundEvents;
+import net.minecraft.inventory.EntityEquipmentSlot;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
-import net.minecraft.nbt.*;
-import net.minecraft.server.MinecraftServer;
+import net.minecraft.item.crafting.IRecipe;
+import net.minecraft.nbt.NBTTagCompound;
+import net.minecraft.nbt.NBTTagList;
+import net.minecraft.tileentity.TileEntity;
 import net.minecraft.util.*;
 import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.RayTraceResult;
-import net.minecraft.util.text.TextComponentTranslation;
 import net.minecraft.util.text.TextFormatting;
 import net.minecraft.util.text.translation.I18n;
 import net.minecraft.world.World;
 import net.minecraft.world.WorldServer;
+import net.minecraft.world.gen.structure.template.PlacementSettings;
+import net.minecraftforge.event.entity.living.LivingEquipmentChangeEvent;
+import net.minecraftforge.event.entity.player.PlayerInteractEvent;
+import net.minecraftforge.fml.common.eventhandler.SubscribeEvent;
 import net.minecraftforge.fml.relauncher.Side;
 import net.minecraftforge.fml.relauncher.SideOnly;
+import net.minecraftforge.items.CapabilityItemHandler;
+import net.minecraftforge.items.IItemHandler;
+import org.apache.commons.lang3.tuple.Pair;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import javax.annotation.Nullable;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -48,11 +62,14 @@ public class CapsuleItem extends Item {
     public final static int STATE_DEPLOYED = 3;
     public final static int STATE_ONE_USE = 5;
     public final static int STATE_ONE_USE_ACTIVATED = 6;
-    public static final int CAPSULE_MAX_CAPTURE_SIZE = 31; // max size of the StructureBlocks Templates
+    public final static int STATE_BLUEPRINT = 7;
+    public static final int CAPSULE_MAX_CAPTURE_SIZE = 255;
     protected static final Logger LOGGER = LogManager.getLogger(CapsuleItem.class);// = 180 / PI
     public static final float TO_RAD = 0.017453292F;
-    public static final float MAX_BLOCKS_PER_TICK_THROW = 1.2f;
     public static final float GRAVITY_PER_TICK = 0.04f;
+
+    public static long lastRotationTime = 0;
+
 
     /**
      * Capsule Mod main item. Used to store region data to be deployed and undeployed.
@@ -61,18 +78,26 @@ public class CapsuleItem extends Item {
      * see STATE_<state> constants.
      * <p>
      * NBTData reference:
-     * * int color 													// material color
-     * * tag display : {int color} 									// base color
-     * * int size													// odd number, size of the square side the capsule can hold
-     * * string label												// User customizable label
-     * * byte overpowered											// If the capsule can capture powerfull blocks
-     * * bool isReward												// if the content of the template must be kept when capsule is deployed.
-     * * string structureName										// name of the template file name without the .nbt extension.
+     * int color                                                  // material color
+     * tag display : {int color}                                  // base color
+     * int size                                                   // odd number, size of the square side the capsule can hold
+     * string label                                               // User customizable label
+     * byte overpowered                                           // If the capsule can capture powerfull blocks
+     * bool onUse                                                 // if the content of the template must be kept when capsule is deployed.
+     * bool isReward                                              // if the template is located in the configured reward folder
+     * string author                                              // Name of the player who created the structure. Set using commands.
+     * string structureName                                       // name of the template file name without the .nbt extension.
      * // Lookup paths are /<worldsave>/structures/capsule for non-rewards, and structureName must contains the full path for rewards and loots
-     * * tag activetimer : {int starttime} 							// used to time the moment when the capsule must deactivate
-     * * tag occupiedSpawnPositions : [{int blockId, long pos},…]   // remember what position not the recapture is block didn't change
-     * * long deployAt												// when thrown with preview, position to deploy the capsule to match preview
-     * * arr ench:[0:{lvl:1s,id:101s}]
+     * string prevStructureName                                   // Used to remove older unused blueprint templates
+     * tag activetimer : {int starttime}                          // used to time the moment when the capsule must deactivate
+     * tag spawnPosition : {int x, int y, int z, int dim    }     // location where the capsule is currently deployed
+     * tag occupiedSpawnPositions : [{int blockId, long pos},…]   // remember what position not the recapture is block didn't change
+     * long deployAt                                              // when thrown with preview, position to deploy the capsule to match preview
+     * int upgraded                                               // How many upgrades the capsule has
+     * tag sourceInventory : {int x, int y, int z, int dim    }   // [Blueprints] location of the linked inventory
+     * string mirror                                              // [Blueprints] current mirror mode
+     * string rotation                                            // [Blueprints] current rotation mode
+     * arr ench:[0:{lvl:1s,id:101s}]
      *
      * @param unlocalizedName registry name
      */
@@ -82,34 +107,6 @@ public class CapsuleItem extends Item {
         this.setUnlocalizedName(unlocalizedName);
         this.setMaxStackSize(1);
         this.setMaxDamage(0);
-    }
-
-    public static ItemStack createEmptyCapsule(int baseColor, int materialColor, int size, boolean overpowered, @Nullable String label, @Nullable Integer upgraded) {
-        ItemStack capsule = new ItemStack(CapsuleItems.capsule, 1, STATE_EMPTY);
-        Helpers.setColor(capsule, baseColor); // standard dye is for baseColor
-        capsule.setTagInfo("color", new NBTTagInt(materialColor)); // "color" is for materialColor
-        capsule.setTagInfo("size", new NBTTagInt(size));
-        if (upgraded != null) {
-            capsule.setTagInfo("upgraded", new NBTTagInt(upgraded));
-        }
-        if (overpowered) {
-            capsule.setTagInfo("overpowered", new NBTTagByte((byte) 1));
-        }
-        if (label != null) {
-            capsule.setTagInfo("label", new NBTTagString(label));
-        }
-
-        return capsule;
-    }
-
-    public static ItemStack createRewardCapsule(String structureName, int baseColor, int materialColor, int size, @Nullable String label, @Nullable String author) {
-        ItemStack capsule = createEmptyCapsule(baseColor, materialColor, size, false, label, null);
-        setIsReward(capsule);
-        setOneUse(capsule);
-        setStructureName(capsule, structureName);
-        setAuthor(capsule, author);
-
-        return capsule;
     }
 
     public static boolean isOneUse(ItemStack stack) {
@@ -122,6 +119,17 @@ public class CapsuleItem extends Item {
         }
         capsule.setItemDamage(STATE_ONE_USE);
         capsule.getTagCompound().setBoolean("oneUse", true);
+    }
+
+    public static boolean isBlueprint(ItemStack stack) {
+        return !stack.isEmpty() && stack.getItem() instanceof CapsuleItem && stack.hasTagCompound() && stack.getTagCompound().hasKey("sourceInventory");
+    }
+
+    public static void setBlueprint(ItemStack capsule) {
+        if (!capsule.hasTagCompound()) {
+            capsule.setTagCompound(new NBTTagCompound());
+        }
+        saveSourceInventory(capsule, null, 0);
     }
 
     public static boolean isReward(ItemStack stack) {
@@ -137,8 +145,16 @@ public class CapsuleItem extends Item {
         setOneUse(capsule);
     }
 
-    public static boolean isLinked(ItemStack stack) {
+    public static boolean isInstantAndUndeployed(ItemStack capsule) {
+        return capsule.getItemDamage() == STATE_BLUEPRINT || (getSize(capsule) == 1 && capsule.getItemDamage() != STATE_DEPLOYED);
+    }
+
+    public static boolean hasStructureLink(ItemStack stack) {
         return !stack.isEmpty() && stack.hasTagCompound() && stack.getTagCompound().hasKey("structureName");
+    }
+
+    public static boolean isLinkedStateCapsule(ItemStack itemstack) {
+        return (!itemstack.isEmpty() && itemstack.getItem() instanceof CapsuleItem && CapsuleItem.STATE_LINKED == itemstack.getItemDamage());
     }
 
     public static String getLabel(ItemStack stack) {
@@ -146,10 +162,10 @@ public class CapsuleItem extends Item {
         if (stack.isEmpty())
             return "";
 
-        if (!isLinked(stack)) {
+        if (!hasStructureLink(stack) && stack.getItemDamage() != STATE_LINKED) {
             return I18n.translateToLocal("item.capsule.content_empty");
         } else if (stack.hasTagCompound() && stack.getTagCompound().hasKey("label") && !"".equals(stack.getTagCompound().getString("label"))) {
-            return "“" + TextFormatting.ITALIC + stack.getTagCompound().getString("label") + TextFormatting.RESET + "”";
+            return "«" + TextFormatting.ITALIC + stack.getTagCompound().getString("label") + TextFormatting.RESET + "»";
         }
         return I18n.translateToLocal("item.capsule.content_unlabeled");
     }
@@ -164,18 +180,18 @@ public class CapsuleItem extends Item {
     /**
      * The capsule capture size.
      */
-    public static int getSize(ItemStack itemStackIn) {
+    public static int getSize(ItemStack capsule) {
         int size = 1;
-        if (!itemStackIn.isEmpty() && itemStackIn.hasTagCompound() && itemStackIn.getTagCompound().hasKey("size")) {
-            size = itemStackIn.getTagCompound().getInteger("size");
+        if (!capsule.isEmpty() && capsule.hasTagCompound() && capsule.getTagCompound().hasKey("size")) {
+            size = capsule.getTagCompound().getInteger("size");
         }
         if (size > CAPSULE_MAX_CAPTURE_SIZE) {
             size = CAPSULE_MAX_CAPTURE_SIZE;
-            itemStackIn.getTagCompound().setInteger("size", size);
+            capsule.getTagCompound().setInteger("size", size);
             LOGGER.error("Capsule sizes are capped to " + CAPSULE_MAX_CAPTURE_SIZE + ". Resized to : " + size);
         } else if (size % 2 == 0) {
-            size--;
-            itemStackIn.getTagCompound().setInteger("size", size);
+            size++;
+            capsule.getTagCompound().setInteger("size", size);
             LOGGER.error("Capsule size must be an odd number to achieve consistency on deployment. Resized to : " + size);
         }
 
@@ -190,7 +206,7 @@ public class CapsuleItem extends Item {
             size = CAPSULE_MAX_CAPTURE_SIZE;
             LOGGER.warn("Capsule sizes are capped to " + CAPSULE_MAX_CAPTURE_SIZE + ". Resized to : " + size);
         } else if (size % 2 == 0) {
-            size--;
+            size++;
             LOGGER.warn("Capsule size must be an odd number to achieve consistency on deployment. Resized to : " + size);
         }
         capsule.getTagCompound().setInteger("size", size);
@@ -224,16 +240,16 @@ public class CapsuleItem extends Item {
         if (!capsule.hasTagCompound()) {
             capsule.setTagCompound(new NBTTagCompound());
         }
-        if (!Strings.isNullOrEmpty(author)) capsule.getTagCompound().setString("author", author);
+        if (!StringUtils.isNullOrEmpty(author)) capsule.getTagCompound().setString("author", author);
     }
 
 
     public static int getBaseColor(ItemStack capsule) {
-        return Helpers.getColor(capsule);
+        return MinecraftNBT.getColor(capsule);
     }
 
     public static void setBaseColor(ItemStack capsule, int color) {
-        Helpers.setColor(capsule, color);
+        MinecraftNBT.setColor(capsule, color);
     }
 
     public static int getMaterialColor(ItemStack capsule) {
@@ -274,71 +290,43 @@ public class CapsuleItem extends Item {
         return dim;
     }
 
-    public static void moveEntityItemToDeployPos(final EntityItem entityItem, final ItemStack capsule, boolean keepMomentum) {
-        if (!capsule.hasTagCompound()) return;
-        BlockPos dest = BlockPos.fromLong(capsule.getTagCompound().getLong("deployAt"));
-        // +0.5 to aim the center of the block
-        double diffX = (dest.getX() + 0.5 - entityItem.posX);
-        double diffZ = (dest.getZ() + 0.5 - entityItem.posZ);
-
-        double distance = MathHelper.sqrt(diffX * diffX + diffZ * diffZ);
-
-        // velocity will slow down when approaching
-        double requiredVelocity = distance / 10;
-        double velocity = Math.min(requiredVelocity, MAX_BLOCKS_PER_TICK_THROW);
-        double normalizedDiffX = (diffX / distance);
-        double normalizedDiffZ = (diffZ / distance);
-
-        // momentum allow to hit side walls
-        entityItem.motionX = keepMomentum ? 0.9 * entityItem.motionX + 0.1 * normalizedDiffX * velocity : normalizedDiffX * velocity;
-        entityItem.motionZ = keepMomentum ? 0.9 * entityItem.motionZ + 0.1 * normalizedDiffZ * velocity : normalizedDiffZ * velocity;
-    }
-
     public static void setState(ItemStack stack, int state) {
-
         stack.setItemDamage(state);
     }
 
-    /**
-     * Throw an item and return the new EntityItem created. Simulated a drop
-     * with stronger throw.
-     */
-    public static EntityItem throwCapsule(ItemStack itemStackIn, EntityPlayer playerIn, BlockPos destination) {
-        // startPosition from EntityThrowable
-        double startPosition = playerIn.posY - 0.3D + (double) playerIn.getEyeHeight();
-        EntityItem entityitem = new EntityItem(playerIn.getEntityWorld(), playerIn.posX, startPosition, playerIn.posZ, itemStackIn);
-        entityitem.setPickupDelay(20);// cannot be picked up before deployment
-        entityitem.setThrower(playerIn.getName());
-        entityitem.setNoDespawn();
+    public static boolean isOverpowered(ItemStack stack) {
+        return stack.hasTagCompound() && stack.getTagCompound().hasKey("overpowered") && stack.getTagCompound().getByte("overpowered") == (byte) 1;
+    }
 
-        if (destination != null) {
+    private static boolean isActivated(ItemStack capsule) {
+        return capsule.getItemDamage() == STATE_ACTIVATED || capsule.getItemDamage() == STATE_EMPTY_ACTIVATED
+                || capsule.getItemDamage() == STATE_ONE_USE_ACTIVATED;
+    }
 
-            itemStackIn.getTagCompound().setLong("deployAt", destination.toLong());
-
-            moveEntityItemToDeployPos(entityitem, itemStackIn, false);
-            BlockPos playerPos = playerIn.getPosition();
-            // +0.5 to aim the center of the block
-            double diffX = (destination.getX() + 0.5 - playerPos.getX());
-            double diffZ = (destination.getZ() + 0.5 - playerPos.getZ());
-            double flatDistance = MathHelper.sqrt(diffX * diffX + diffZ * diffZ);
-
-            double diffY = destination.getY() - playerPos.getY() + Math.min(1, flatDistance / 3);
-            double yVelocity = (diffY / 10) - (0.5 * 10 * -1 * GRAVITY_PER_TICK); // move up then down
-            entityitem.motionY = Math.max(0.05, yVelocity);
-
-        } else {
-            float f = 0.5F;
-
-            entityitem.motionX = (double) (-MathHelper.sin(playerIn.rotationYaw * TO_RAD) * MathHelper.cos(playerIn.rotationPitch * TO_RAD) * f) + playerIn.motionX;
-            entityitem.motionZ = (double) (MathHelper.cos(playerIn.rotationYaw * TO_RAD) * MathHelper.cos(playerIn.rotationPitch * TO_RAD) * f) + playerIn.motionZ;
-            entityitem.motionY = (double) (-MathHelper.sin(playerIn.rotationPitch * TO_RAD) * f + 0.1F) + playerIn.motionY;
+    public static void setCanRotate(ItemStack capsule, boolean canRotate) {
+        if (!capsule.hasTagCompound()) {
+            capsule.setTagCompound(new NBTTagCompound());
         }
+        capsule.getTagCompound().setBoolean("canRotate", canRotate);
+    }
 
-        playerIn.dropItemAndGetStack(entityitem);
-        playerIn.inventory.setInventorySlotContents(playerIn.inventory.currentItem, ItemStack.EMPTY);
-        playerIn.getEntityWorld().playSound(null, entityitem.getPosition(), SoundEvents.ENTITY_ARROW_SHOOT, SoundCategory.BLOCKS, 0.2F, 0.1f);
+    public static boolean canRotate(ItemStack capsule) {
+        return isBlueprint(capsule) || capsule.getItemDamage() != STATE_DEPLOYED && capsule.hasTagCompound() && capsule.getTagCompound().hasKey("canRotate") && capsule.getTagCompound().getBoolean("canRotate");
+    }
 
-        return entityitem;
+    public static void revertStateFromActivated(ItemStack capsule) {
+        if (isBlueprint(capsule)) {
+            setState(capsule, STATE_BLUEPRINT);
+        } else if (isOneUse(capsule)) {
+            setState(capsule, STATE_ONE_USE);
+        } else if (hasStructureLink(capsule)) {
+            setState(capsule, STATE_LINKED);
+        } else {
+            setState(capsule, STATE_EMPTY);
+        }
+        if (capsule.hasTagCompound()) {
+            capsule.getTagCompound().removeTag("activetimer");
+        }
     }
 
     @Override
@@ -356,7 +344,11 @@ public class CapsuleItem extends Item {
                 state = "";
                 break;
             case STATE_DEPLOYED:
-                state = I18n.translateToLocal("item.capsule.state_deployed");
+                if (isBlueprint(stack)) {
+                    name = I18n.translateToLocal("item.capsule.state_blueprint");
+                } else {
+                    state = I18n.translateToLocal("item.capsule.state_deployed");
+                }
                 break;
             case STATE_ONE_USE:
                 if (isReward(stack)) {
@@ -364,7 +356,9 @@ public class CapsuleItem extends Item {
                 } else {
                     state = I18n.translateToLocal("item.capsule.state_recovery");
                 }
-
+                break;
+            case STATE_BLUEPRINT:
+                name = I18n.translateToLocal("item.capsule.state_blueprint");
                 break;
         }
 
@@ -399,36 +393,72 @@ public class CapsuleItem extends Item {
         return isOverpowered(stack);
     }
 
-    @SuppressWarnings({"rawtypes", "unchecked"})
     @Override
-    public void addInformation(ItemStack stack, @Nullable World worldIn, List tooltip, ITooltipFlag flagIn) {
+    @SideOnly(Side.CLIENT)
+    public void addInformation(ItemStack capsule, @Nullable World worldIn, List<String> tooltip, ITooltipFlag flagIn) {
 
-        if (isOverpowered(stack)) {
-            tooltip.add(TextFormatting.DARK_PURPLE + I18n.translateToLocal("capsule.tooltip.overpowered") + TextFormatting.RESET);
-        }
-
-        int size = getSize(stack);
-        String author = getAuthor(stack);
+        String author = getAuthor(capsule);
         if (author != null) {
             tooltip.add(TextFormatting.DARK_AQUA + "" + TextFormatting.ITALIC + I18n.translateToLocal("capsule.tooltip.author") + " " + author + TextFormatting.RESET);
         }
 
-        int upgradeLevel = getUpgradeLevel(stack);
-        String sizeTxt = String.valueOf(size) + "×" + String.valueOf(size) + "×" + String.valueOf(size);
-        if (upgradeLevel > 0) {
-            sizeTxt += " (" + upgradeLevel + "/" + Config.upgradeLimit + " " + I18n.translateToLocal("capsule.tooltip.upgraded") + ")";
-        }
-        tooltip.add(I18n.translateToLocal("capsule.tooltip.size") + ": " + sizeTxt);
-
-        if (stack.getItemDamage() == STATE_ONE_USE) {
+        if (capsule.getItemDamage() == STATE_ONE_USE) {
             tooltip.add(I18n.translateToLocal("capsule.tooltip.one_use").trim());
         }
 
+        if (isOverpowered(capsule)) {
+            tooltip.add(TextFormatting.DARK_PURPLE + I18n.translateToLocal("capsule.tooltip.overpowered") + TextFormatting.RESET);
+        }
 
+        int size = getSize(capsule);
+        int upgradeLevel = getUpgradeLevel(capsule);
+        String sizeTxt = size + "×" + size + "×" + size;
+        if (upgradeLevel > 0) {
+            sizeTxt += " (" + upgradeLevel + "/" + Config.upgradeLimit + " " + I18n.translateToLocal("capsule.tooltip.upgraded") + ")";
+        }
+        if (isInstantAndUndeployed(capsule) || isBlueprint(capsule)) {
+            sizeTxt += " (" + I18n.translateToLocal("capsule.tooltip.instant").trim() + ")";
+        }
+        tooltip.add(I18n.translateToLocal("capsule.tooltip.size") + ": " + sizeTxt);
+
+
+        if (isBlueprint(capsule)) {
+            if (capsule.getItemDamage() == STATE_DEPLOYED) {
+                tooltipAddMultiline(tooltip, "capsule.tooltip.blueprintUseUncharged", TextFormatting.WHITE);
+            } else {
+                tooltipAddMultiline(tooltip, "capsule.tooltip.canRotate", TextFormatting.WHITE);
+                tooltipAddMultiline(tooltip, "capsule.tooltip.blueprintUseCharged", TextFormatting.WHITE);
+
+            }
+        } else {
+            if (canRotate(capsule)) {
+                tooltipAddMultiline(tooltip, "capsule.tooltip.canRotate", TextFormatting.WHITE);
+            } else if (capsule.hasTagCompound() && capsule.getTagCompound().hasKey("canRotate")) {
+                tooltipAddMultiline(tooltip, "capsule.tooltip.cannotRotate", TextFormatting.DARK_GRAY);
+            }
+        }
+        if (flagIn == ITooltipFlag.TooltipFlags.ADVANCED) {
+            tooltip.add(TextFormatting.GOLD + "structureName: " + getStructureName(capsule));
+            tooltip.add(TextFormatting.GOLD + "oneUse: " + isOneUse(capsule));
+            tooltip.add(TextFormatting.GOLD + "isReward: " + isReward(capsule));
+            if (isBlueprint(capsule)) {
+                tooltip.add(TextFormatting.GOLD + "sourceInventory: " + getSourceInventoryLocation(capsule) + " in dimension " + getSourceInventoryDimension(capsule));
+            }
+            tooltip.add(TextFormatting.GOLD + "color (material): " + Integer.toHexString(getMaterialColor(capsule)));
+            PlacementSettings p = getPlacement(capsule);
+            tooltip.add(TextFormatting.GOLD + "⌯ Symmetry: " + Capsule.getMirrorLabel(p));
+            tooltip.add(TextFormatting.GOLD + "⟳ Rotation: " + Capsule.getRotationLabel(p));
+        }
     }
 
-    public boolean isOverpowered(ItemStack stack) {
-        return stack.hasTagCompound() && stack.getTagCompound().hasKey("overpowered") && stack.getTagCompound().getByte("overpowered") == (byte) 1;
+    public void tooltipAddMultiline(List<String> tooltip, String key) {
+        tooltipAddMultiline(tooltip, key, null);
+    }
+
+    public void tooltipAddMultiline(List<String> tooltip, String key, TextFormatting formatting) {
+        for (String s : I18n.translateToLocal(key).trim().split("\\\\n")) {
+            tooltip.add(formatting == null ? s : formatting + s);
+        }
     }
 
     /**
@@ -437,39 +467,84 @@ public class CapsuleItem extends Item {
     @SideOnly(Side.CLIENT)
     public void getSubItems(CreativeTabs tab, NonNullList<ItemStack> subItems) {
         if (this.isInCreativeTab(tab)) {
-            ItemStack ironCapsule = new ItemStack(CapsuleItems.capsule, 1, STATE_EMPTY);
-            ironCapsule.setTagInfo("color", new NBTTagInt(0xCCCCCC));
-            ironCapsule.setTagInfo("size", new NBTTagInt(Config.ironCapsuleSize));
-
-            ItemStack goldCapsule = new ItemStack(CapsuleItems.capsule, 1, STATE_EMPTY);
-            goldCapsule.setTagInfo("color", new NBTTagInt(0xFFD700));
-            goldCapsule.setTagInfo("size", new NBTTagInt(Config.goldCapsuleSize));
-
-            ItemStack diamondCapsule = new ItemStack(CapsuleItems.capsule, 1, STATE_EMPTY);
-            diamondCapsule.setTagInfo("color", new NBTTagInt(0x00FFF2));
-            diamondCapsule.setTagInfo("size", new NBTTagInt(Config.diamondCapsuleSize));
-
-            ItemStack opCapsule = new ItemStack(CapsuleItems.capsule, 1, STATE_EMPTY);
-            opCapsule.setTagInfo("color", new NBTTagInt(0xFFFFFF));
-            opCapsule.setTagInfo("size", new NBTTagInt(Config.opCapsuleSize));
-            opCapsule.setTagInfo("overpowered", new NBTTagByte((byte) 1));
-
-            ItemStack unlabelledCapsule = ironCapsule.copy();
-            unlabelledCapsule.setItemDamage(STATE_LINKED);
-            unlabelledCapsule.getTagCompound().setString("structureName", "(C-CreativeLinkedCapsule)");
-
-            ItemStack recoveryCapsule = ironCapsule.copy();
-            CapsuleItem.setOneUse(recoveryCapsule);
-            unlabelledCapsule.getTagCompound().setString("structureName", "(C-CreativeOneUseCapsule)");
-
-            subItems.add(ironCapsule);
-            subItems.add(goldCapsule);
-            subItems.add(diamondCapsule);
-            subItems.add(opCapsule);
-
-            subItems.add(unlabelledCapsule);
-            subItems.add(recoveryCapsule);
+            // Add capsuleList items, loaded from json files
+            subItems.addAll(CapsuleItems.capsuleList.keySet());
+            subItems.addAll(CapsuleItems.opCapsuleList.keySet());
+            for (Pair<ItemStack, IRecipe> blueprintCapsule : CapsuleItems.blueprintCapsules) {
+                subItems.add(blueprintCapsule.getKey());
+            }
+            if (CapsuleItems.unlabelledCapsule != null) subItems.add(CapsuleItems.unlabelledCapsule.getKey());
+            if (CapsuleItems.recoveryCapsule != null) subItems.add(CapsuleItems.recoveryCapsule.getKey());
         }
+    }
+
+
+    @SubscribeEvent
+    @SideOnly(Side.CLIENT)
+    public void onLeftClick(PlayerInteractEvent.LeftClickEmpty event) {
+        ItemStack stack = event.getEntityPlayer().getHeldItemMainhand();
+        if (event.getWorld().isRemote && stack.getItem() instanceof CapsuleItem && (CapsuleItem.isBlueprint(stack) || CapsuleItem.canRotate(stack))) {
+            CommonProxy.simpleNetworkWrapper.sendToServer(new CapsuleLeftClickQueryToServer());
+            askPreviewIfNeeded(stack);
+        }
+    }
+
+    @SubscribeEvent
+    public void onLeftClickBlock(PlayerInteractEvent.LeftClickBlock event) {
+        if (!event.isCanceled()) {
+            ItemStack stack = event.getEntityPlayer().getHeldItemMainhand();
+            if (stack.getItem() instanceof CapsuleItem && CapsuleItem.canRotate(stack)) {
+                event.setCanceled(true);
+                if (event.getWorld().isRemote) {
+                    if (lastRotationTime + 60 < Minecraft.getSystemTime()) {
+                        lastRotationTime = Minecraft.getSystemTime();
+                        // prevent action to be triggered on server + on client
+                        CommonProxy.simpleNetworkWrapper.sendToServer(new CapsuleLeftClickQueryToServer());
+                        askPreviewIfNeeded(stack);
+                    }
+                }
+            }
+        }
+    }
+
+    @SubscribeEvent
+    @SideOnly(Side.CLIENT)
+    public void heldItemChange(LivingEquipmentChangeEvent event) {
+        if (event.getEntity() instanceof EntityPlayer && event.getSlot().equals(EntityEquipmentSlot.MAINHAND) && isBlueprint(event.getTo())) {
+            askPreviewIfNeeded(event.getTo());
+        }
+    }
+
+    @SideOnly(Side.CLIENT)
+    public void askPreviewIfNeeded(ItemStack stack) {
+        if (!CapsulePreviewHandler.currentPreview.containsKey(getStructureName(stack))) {
+            // try to get the preview from server
+            CommonProxy.simpleNetworkWrapper.sendToServer(new CapsuleContentPreviewQueryToServer(getStructureName(stack)));
+        }
+    }
+
+    @Override
+    public EnumActionResult onItemUseFirst(EntityPlayer player, World world, BlockPos pos, EnumFacing side, float hitX, float hitY, float hitZ, EnumHand hand) {
+
+        if (hand == EnumHand.OFF_HAND) {
+            return EnumActionResult.PASS;
+        }
+        ItemStack capsule = player.getHeldItem(hand);
+        if (player.isSneaking() && isBlueprint(capsule)) {
+            TileEntity te = world.getTileEntity(pos);
+            if (te != null && te.hasCapability(CapabilityItemHandler.ITEM_HANDLER_CAPABILITY, null)) {
+                if (hasSourceInventory(capsule) && pos.equals(getSourceInventoryLocation(capsule)) && getSourceInventoryDimension(capsule).equals(world.provider.getDimension())) {
+                    // remove if it was the same
+                    saveSourceInventory(capsule, null, 0);
+                } else {
+                    // new inventory
+                    saveSourceInventory(capsule, pos, world.provider.getDimension());
+                }
+                return EnumActionResult.SUCCESS;
+            }
+        }
+
+        return super.onItemUseFirst(player, world, pos, side, hitX, hitY, hitZ, hand);
     }
 
     /**
@@ -477,74 +552,83 @@ public class CapsuleItem extends Item {
      */
     @Override
     public ActionResult<ItemStack> onItemRightClick(World worldIn, EntityPlayer playerIn, EnumHand handIn) {
-        ItemStack itemStackIn = playerIn.getHeldItem(handIn);
+        ItemStack capsule = playerIn.getHeldItem(handIn);
 
         if (handIn == EnumHand.OFF_HAND) {
-            return new ActionResult<>(EnumActionResult.FAIL, itemStackIn);
+            return new ActionResult<>(EnumActionResult.FAIL, capsule);
         }
 
-        if (playerIn.isSneaking() && (itemStackIn.getItemDamage() == STATE_LINKED || itemStackIn.getItemDamage() == STATE_DEPLOYED || itemStackIn.getItemDamage() == STATE_ONE_USE)) {
+        if (playerIn.isSneaking() && (capsule.getItemDamage() == STATE_LINKED || capsule.getItemDamage() == STATE_DEPLOYED || capsule.getItemDamage() == STATE_ONE_USE || capsule.getItemDamage() == STATE_BLUEPRINT)) {
             Main.proxy.openGuiScreen(playerIn);
 
         } else if (!worldIn.isRemote) {
-
-            // an empty or a linked capsule is activated on right click
-            if (itemStackIn.getItemDamage() == STATE_EMPTY || itemStackIn.getItemDamage() == STATE_LINKED
-                    || itemStackIn.getItemDamage() == STATE_ONE_USE) {
-                if (itemStackIn.getItemDamage() == STATE_EMPTY) {
-                    setState(itemStackIn, STATE_EMPTY_ACTIVATED);
-                }
-                if (itemStackIn.getItemDamage() == STATE_LINKED) {
-                    setState(itemStackIn, STATE_ACTIVATED);
-                }
-                if (itemStackIn.getItemDamage() == STATE_ONE_USE) {
-                    setState(itemStackIn, STATE_ONE_USE_ACTIVATED);
-                }
-
-                NBTTagCompound timer = itemStackIn.getOrCreateSubCompound("activetimer");
-                timer.setInteger("starttime", playerIn.ticksExisted);
-                worldIn.playSound(null, playerIn.getPosition(), SoundEvents.BLOCK_STONE_BUTTON_CLICK_ON, SoundCategory.BLOCKS, 0.2F, 0.9F);
+            // a capsule is activated on right click, except instant that are deployed immediatly
+            if (!isInstantAndUndeployed(capsule)) {
+                activateCapsule(capsule, worldIn, playerIn);
             }
-
-            // an opened capsule revoke deployed content on right click
-            else if (itemStackIn.getItemDamage() == STATE_DEPLOYED) {
-
-                try {
-                    resentToCapsule(itemStackIn, playerIn);
-                    worldIn.playSound(null, playerIn.getPosition(), SoundEvents.BLOCK_STONE_BUTTON_CLICK_OFF, SoundCategory.BLOCKS, 0.2F, 0.4F);
-                } catch (Exception e) {
-                    LOGGER.error("Couldn't resend the content into the capsule", e);
-                }
-
-            }
-        }
-
-        if (worldIn.isRemote) {
+        } else if (worldIn.isRemote) {
             // client side, if is going to get activated, ask for server preview
-            if (itemStackIn.hasTagCompound()
-                    && (itemStackIn.getItemDamage() == STATE_LINKED || itemStackIn.getItemDamage() == STATE_ONE_USE)) {
-                RayTraceResult rtr = isLinked(itemStackIn) ? Helpers.clientRayTracePreview(playerIn, 0) : null;
+            if (!isInstantAndUndeployed(capsule)
+                    && (capsule.getItemDamage() == STATE_LINKED || capsule.getItemDamage() == STATE_ONE_USE)) {
+                RayTraceResult rtr = hasStructureLink(capsule) ? Spacial.clientRayTracePreview(playerIn, 0, getSize(capsule)) : null;
                 BlockPos dest = rtr != null && rtr.typeOfHit == RayTraceResult.Type.BLOCK ? rtr.getBlockPos().add(rtr.sideHit.getDirectionVec()) : null;
                 if (dest != null) {
-                    CommonProxy.simpleNetworkWrapper.sendToServer(new CapsuleContentPreviewQueryToServer(itemStackIn.getTagCompound().getString("structureName")));
+                    CommonProxy.simpleNetworkWrapper.sendToServer(new CapsuleContentPreviewQueryToServer(capsule.getTagCompound().getString("structureName")));
                 }
             }
 
-            // client side, is activated, ask for the server a throw at position
-            if (isActivated(itemStackIn)) {
-                RayTraceResult rtr = isLinked(itemStackIn) ? Helpers.clientRayTracePreview(playerIn, 0) : null;
+            // client side, is deployable, ask for the server a throw at position
+            if (isInstantAndUndeployed(capsule)) {
+                RayTraceResult rtr = Spacial.clientRayTracePreview(playerIn, 0, getSize(capsule));
+                BlockPos dest = null;
+                if (rtr != null && rtr.typeOfHit == RayTraceResult.Type.BLOCK) {
+                    if (capsule.getItemDamage() == STATE_EMPTY) {
+                        dest = rtr.getBlockPos();
+                    } else {
+                        dest = rtr.getBlockPos().add(rtr.sideHit.getDirectionVec());
+                    }
+                }
+                if (dest != null) {
+                    CommonProxy.simpleNetworkWrapper.sendToServer(new CapsuleThrowQueryToServer(dest, true));
+                }
+            } else if (isActivated(capsule)) {
+                RayTraceResult rtr = hasStructureLink(capsule) ? Spacial.clientRayTracePreview(playerIn, 0, getSize(capsule)) : null;
                 BlockPos dest = rtr != null && rtr.typeOfHit == RayTraceResult.Type.BLOCK ? rtr.getBlockPos().add(rtr.sideHit.getDirectionVec()) : null;
-                CommonProxy.simpleNetworkWrapper.sendToServer(new CapsuleThrowQueryToServer(dest));
+                CommonProxy.simpleNetworkWrapper.sendToServer(new CapsuleThrowQueryToServer(dest, false));
             }
         }
 
-        return new ActionResult<>(EnumActionResult.SUCCESS, itemStackIn);
+        return new ActionResult<>(EnumActionResult.SUCCESS, capsule);
     }
 
-    private boolean isActivated(ItemStack itemStackIn) {
-        return itemStackIn.getItemDamage() == STATE_ACTIVATED || itemStackIn.getItemDamage() == STATE_EMPTY_ACTIVATED
-                || itemStackIn.getItemDamage() == STATE_ONE_USE_ACTIVATED;
+    public void activateCapsule(ItemStack capsule, World worldIn, EntityPlayer playerIn) {
+        if (capsule.getItemDamage() == STATE_EMPTY) {
+            setState(capsule, STATE_EMPTY_ACTIVATED);
+            startTimer(worldIn, playerIn, capsule);
+        } else if (capsule.getItemDamage() == STATE_LINKED) {
+            setState(capsule, STATE_ACTIVATED);
+            startTimer(worldIn, playerIn, capsule);
+        } else if (capsule.getItemDamage() == STATE_ONE_USE) {
+            setState(capsule, STATE_ONE_USE_ACTIVATED);
+            startTimer(worldIn, playerIn, capsule);
+        }
+        // an open capsule undeploy content on right click
+        else if (capsule.getItemDamage() == STATE_DEPLOYED) {
+            try {
+                Capsule.resentToCapsule(capsule, playerIn);
+                worldIn.playSound(null, playerIn.getPosition(), SoundEvents.BLOCK_STONE_BUTTON_CLICK_OFF, SoundCategory.BLOCKS, 0.2F, 0.4F);
+            } catch (Exception e) {
+                LOGGER.error("Couldn't resend the content into the capsule", e);
+            }
+        }
     }
+
+    private void startTimer(World worldIn, EntityPlayer playerIn, ItemStack capsule) {
+        NBTTagCompound timer = capsule.getOrCreateSubCompound("activetimer");
+        timer.setInteger("starttime", playerIn.ticksExisted);
+        worldIn.playSound(null, playerIn.getPosition(), SoundEvents.BLOCK_STONE_BUTTON_CLICK_ON, SoundCategory.BLOCKS, 0.2F, 0.9F);
+    }
+
 
     /**
      * Manage the "activated" state of the capsule.
@@ -558,29 +642,15 @@ public class CapsuleItem extends Item {
             // disable capsule after some time
             NBTTagCompound timer = stack.getSubCompound("activetimer");
 
-            if (timer != null && this.isActivated(stack) && timer.hasKey("starttime") && entityIn.ticksExisted >= timer.getInteger("starttime") + ACTIVE_DURATION_IN_TICKS) {
+            if (timer != null && isActivated(stack) && timer.hasKey("starttime") && entityIn.ticksExisted >= timer.getInteger("starttime") + ACTIVE_DURATION_IN_TICKS) {
                 revertStateFromActivated(stack);
                 worldIn.playSound(null, entityIn.getPosition(), SoundEvents.BLOCK_STONE_BUTTON_CLICK_OFF, SoundCategory.BLOCKS, 0.2F, 0.4F);
             }
+            // special case that can happen in case of crash
+            if (isActivated(stack) && !timer.hasKey("starttime")) {
+                revertStateFromActivated(stack);
+            }
         }
-    }
-
-    public static boolean isThrowerUnderLiquid(final EntityItem entityItem) {
-        String thrower = entityItem.getThrower();
-        if (thrower == null) return false;
-        EntityPlayer player = entityItem.getEntityWorld().getPlayerEntityByName(thrower);
-        boolean underLiquid = Helpers.isImmergedInLiquid(player);
-        return underLiquid;
-    }
-
-    public static boolean isEntityCollidingLiquid(final EntityItem entityItem) {
-        return !entityItem.isOffsetPositionInLiquid(0, -0.1, 0);
-    }
-
-    public static boolean entityItemShouldAndCollideLiquid(final EntityItem entityItem) {
-        boolean throwerInLiquid = isThrowerUnderLiquid(entityItem);
-        boolean entityInLiquid = isEntityCollidingLiquid(entityItem);
-        return !throwerInLiquid && entityInLiquid;
     }
 
     /**
@@ -596,97 +666,38 @@ public class CapsuleItem extends Item {
         // Deploying capsule content on collision with a block
         if (!entityItem.getEntityWorld().isRemote
                 && entityItem.ticksExisted > 2 // avoid immediate collision
-                && this.isActivated(capsule)
-                && (entityItem.collided || entityItemShouldAndCollideLiquid(entityItem))
-                ) {
-
-            // stop the capsule where it collided
-            entityItem.motionX = 0;
-            entityItem.motionZ = 0;
-            entityItem.motionY = 0;
-
-            final int size = getSize(capsule);
-            final int extendLength = (size - 1) / 2;
-
-            // get destination world available position
-            final WorldServer itemWorld = (WorldServer) entityItem.getEntityWorld();
-
-            if (isLinked(capsule)) {
-
-                // DEPLOY
-                // is linked, deploy
-                boolean deployed = deployCapsule(entityItem, capsule, extendLength, itemWorld);
-                if (deployed)
-                    itemWorld.playSound(null, entityItem.getPosition(), SoundEvents.ENTITY_IRONGOLEM_ATTACK, SoundCategory.BLOCKS, 0.4F, 0.1F);
-                if (deployed && isOneUse(capsule)) {
-                    entityItem.setDead();
-                }
-
-            } else {
-
-                // CAPTURE
-                // is not linked, capture
-                try {
-                    captureContentIntoCapsule(entityItem, capsule, size, extendLength, itemWorld);
-                } catch (Exception e) {
-                    LOGGER.error("Couldn't capture the content into the capsule", e);
-                }
-            }
-
+                && isActivated(capsule)
+                && (entityItem.collided || Spacial.entityItemShouldAndCollideLiquid(entityItem))
+        ) {
+            Capsule.handleEntityItemOnGround(entityItem, capsule);
         }
 
         // throwing the capsule toward the right place
         if (!entityItem.getEntityWorld().isRemote
-                && this.isActivated(capsule)
+                && isActivated(capsule)
                 && capsule.hasTagCompound()
                 && capsule.getTagCompound().hasKey("deployAt")
-                && !entityItem.collided && !entityItemShouldAndCollideLiquid(entityItem)) {
-            moveEntityItemToDeployPos(entityItem, capsule, true);
+                && !entityItem.collided && !Spacial.entityItemShouldAndCollideLiquid(entityItem)) {
+            Spacial.moveEntityItemToDeployPos(entityItem, capsule, true);
         }
 
         return false;
     }
 
-    /**
-     * Capture the content around the capsule entityItem, update capsule state.
-     */
-    private boolean captureContentIntoCapsule(EntityItem entityItem, ItemStack capsule, int size, int extendLength, WorldServer playerWorld) {
-
-        // specify target to capture
-        BlockPos marker = Helpers.findSpecificBlock(entityItem, size + 2, BlockCapsuleMarker.class);
-        if (marker != null) {
-            BlockPos source = marker.add(-extendLength, 1, -extendLength);
-
-            // Save the region in a structure block file
-            String player = "CapsuleMod";
-            if (entityItem.getThrower() != null) {
-                player = entityItem.getThrower();
-            }
-            String capsuleID = StructureSaver.getUniqueName(playerWorld, player);
-            boolean storageOK = StructureSaver.store(playerWorld, entityItem.getThrower(), capsuleID, source, size, getExcludedBlocs(capsule), null);
-
-            if (storageOK) {
-                // register the link in the capsule
-                setState(capsule, STATE_LINKED);
-                CapsuleItem.setStructureName(capsule, capsuleID);
-                return true;
-            } else {
-                // could not capture, StructureSaver.store handles the feedback already
-                revertStateFromActivated(capsule);
-            }
-        } else {
-            revertStateFromActivated(capsule);
-            // send a chat message to explain failure
-            EntityPlayer player = playerWorld.getPlayerEntityByName(entityItem.getThrower());
-            if (player != null) {
-                player.sendMessage(new TextComponentTranslation("capsule.error.noCaptureBase"));
+    @Override
+    public void onCreated(ItemStack capsule, World worldIn, EntityPlayer playerIn) {
+        if (capsule.getItem() instanceof CapsuleItem && isBlueprint(capsule)) {
+            String srcStructurePath = CapsuleItem.getStructureName(capsule);
+            if (srcStructurePath != null && !worldIn.isRemote && !srcStructurePath.startsWith(StructureSaver.BLUEPRINT_PREFIX)) {
+                String templateName = StructureSaver.createBlueprintTemplate(srcStructurePath, capsule, (WorldServer) worldIn, playerIn);
+                // anyway we write the structure name
+                // we dont want to have the same link as the original capsule
+                CapsuleItem.setStructureName(capsule, templateName);
             }
         }
-
-        return false;
     }
 
-    private Map<BlockPos, Block> getOccupiedSourcePos(ItemStack capsule) {
+    public static Map<BlockPos, Block> getOccupiedSourcePos(ItemStack capsule) {
         Map<BlockPos, Block> occupiedSources = new HashMap<>();
         if (capsule.hasTagCompound() && capsule.getTagCompound().hasKey("occupiedSpawnPositions")) {
             NBTTagList list = capsule.getTagCompound().getTagList("occupiedSpawnPositions", 10);
@@ -698,8 +709,7 @@ public class CapsuleItem extends Item {
         return occupiedSources;
     }
 
-    private Map<BlockPos, Block> setOccupiedSourcePos(ItemStack capsule, Map<BlockPos, Block> occupiedSpawnPositions) {
-        Map<BlockPos, Block> occupiedSources = new HashMap<>();
+    public static void setOccupiedSourcePos(ItemStack capsule, Map<BlockPos, Block> occupiedSpawnPositions) {
         NBTTagList entries = new NBTTagList();
         if (occupiedSpawnPositions != null) {
             for (Entry<BlockPos, Block> entry : occupiedSpawnPositions.entrySet()) {
@@ -713,95 +723,14 @@ public class CapsuleItem extends Item {
             capsule.setTagCompound(new NBTTagCompound());
         }
         capsule.getTagCompound().setTag("occupiedSpawnPositions", entries);
-        return occupiedSources;
     }
 
-    private void revertStateFromActivated(ItemStack capsule) {
-        if (isOneUse(capsule)) {
-            setState(capsule, STATE_ONE_USE);
-        } else if (isLinked(capsule)) {
-            setState(capsule, STATE_LINKED);
-        } else {
-            setState(capsule, STATE_EMPTY);
-        }
-        if (capsule.hasTagCompound()) {
-            capsule.getTagCompound().removeTag("activetimer");
-        }
+    public static void cleanDeploymentTags(ItemStack capsule) {
+        capsule.getTagCompound().removeTag("spawnPosition");
+        capsule.getTagCompound().removeTag("occupiedSpawnPositions"); // don't need anymore those data
     }
 
-    /**
-     * Deploy the capsule at the entityItem position. update capsule state
-     */
-    private boolean deployCapsule(EntityItem entityItem, ItemStack capsule, int extendLength, WorldServer playerWorld) {
-        // specify target to capture
-
-        boolean didSpawn = false;
-
-        BlockPos dest;
-        if (capsule.hasTagCompound() && capsule.getTagCompound().hasKey("deployAt")) {
-            BlockPos centerDest = BlockPos.fromLong(capsule.getTagCompound().getLong("deployAt"));
-            dest = centerDest.add(-extendLength, 0, -extendLength);
-            capsule.getTagCompound().removeTag("deployAt");
-        } else {
-            BlockPos bottomBlockPos = Helpers.findBottomBlock(entityItem);
-            dest = bottomBlockPos.add(-extendLength, 1, -extendLength);
-        }
-        String structureName = capsule.getTagCompound().getString("structureName");
-
-        // do the transportation
-        Map<BlockPos, Block> occupiedSpawnPositions = new HashMap<>();
-        List<String> outEntityBlocking = new ArrayList<>();
-
-        boolean result = StructureSaver.deploy(capsule, playerWorld, entityItem.getThrower(), dest, Config.overridableBlocks, occupiedSpawnPositions, outEntityBlocking);
-
-        if (result) {
-
-            this.setOccupiedSourcePos(capsule, occupiedSpawnPositions);
-
-            // register the link in the capsule
-            if (!isReward(capsule)) {
-
-                setState(capsule, STATE_DEPLOYED);
-                saveSpawnPosition(capsule, dest, entityItem.getEntityWorld().provider.getDimension());
-                // remove the content from the structure block to prevent dupe using recovery capsules
-                StructureSaver.clearTemplate(playerWorld, structureName);
-            }
-
-            didSpawn = true;
-
-        } else {
-            // could not deploy, either entity or block preventing merge
-            revertStateFromActivated(capsule);
-        }
-
-        return didSpawn;
-    }
-
-    private void resentToCapsule(final ItemStack itemStackIn, final EntityPlayer playerIn) {
-        // store again
-        Integer dimensionId = getDimension(itemStackIn);
-        MinecraftServer server = playerIn.getServer();
-        final WorldServer capsuleWorld = dimensionId != null ? server.getWorld(dimensionId) : (WorldServer) playerIn.getEntityWorld();
-
-        NBTTagCompound spawnPos = itemStackIn.getTagCompound().getCompoundTag("spawnPosition");
-        BlockPos source = new BlockPos(spawnPos.getInteger("x"), spawnPos.getInteger("y"), spawnPos.getInteger("z"));
-
-        int size = getSize(itemStackIn);
-
-        // do the transportation
-        boolean storageOK = StructureSaver.store(capsuleWorld, playerIn.getName(), itemStackIn.getTagCompound().getString("structureName"), source, size, getExcludedBlocs(itemStackIn), getOccupiedSourcePos(itemStackIn));
-
-        if (storageOK) {
-            setState(itemStackIn, STATE_LINKED);
-            itemStackIn.getTagCompound().removeTag("spawnPosition");
-            itemStackIn.getTagCompound().removeTag("occupiedSpawnPositions"); // don't need anymore those data
-        } else {
-            LOGGER.error("Error occured during undeploy of capsule.");
-            playerIn.sendMessage(new TextComponentTranslation("capsule.error.technicalError"));
-        }
-    }
-
-    public List<Block> getExcludedBlocs(ItemStack stack) {
+    public static List<Block> getExcludedBlocs(ItemStack stack) {
         List<Block> excludedBlocks = Config.excludedBlocks;
         if (isOverpowered(stack)) {
             excludedBlocks = Config.opExcludedBlocks;
@@ -812,32 +741,39 @@ public class CapsuleItem extends Item {
     /**
      * renderPass 0 => The material color renderPass 1 => The label color
      */
-    public int getColorFromItemstack(ItemStack stack, int renderPass) {
+    public static int getColorFromItemstack(ItemStack stack, int renderPass) {
         int color = 0xFFFFFF;
 
         // material color on label surronding
         if (renderPass == 0) {
-            color = Helpers.getColor(stack);
+            color = MinecraftNBT.getColor(stack);
 
         } else if (renderPass == 1) {
-            if (stack.hasTagCompound() && stack.getTagCompound().hasKey("color")) {
-                color = stack.getTagCompound().getInteger("color");
+            if (isBlueprint(stack) && stack.getItemDamage() == STATE_DEPLOYED) {
+                color = 0x7CC4EA; // trick for blueprint to reuse the "deployed" item model and get okish label color
+            } else {
+                if (stack.hasTagCompound() && stack.getTagCompound().hasKey("color")) {
+                    color = stack.getTagCompound().getInteger("color");
+                }
             }
-
         } else if (renderPass == 2) {
-            color = 0xFFFFFF;
+            if (isBlueprint(stack)) {
+                color = 0x3BB3FC;
+            } else {
+                color = 0xFFFFFF;
+            }
         }
         return color;
     }
 
     /**
-     * Set the NBT tag "key" to be a BlockPos coordinates.
+     * Set the MinecraftNBT tag "key" to be a BlockPos coordinates.
      *
      * @param capsule capsule stack
      * @param dest    position to save as nbt into the capsule stack
      * @param dimID   dimension where the position is.
      */
-    private void saveSpawnPosition(ItemStack capsule, BlockPos dest, int dimID) {
+    public static void saveSpawnPosition(ItemStack capsule, BlockPos dest, int dimID) {
         if (!capsule.hasTagCompound()) {
             capsule.setTagCompound(new NBTTagCompound());
         }
@@ -849,11 +785,98 @@ public class CapsuleItem extends Item {
         capsule.getTagCompound().setTag("spawnPosition", pos);
     }
 
-    public void clearCapsule(ItemStack capsule) {
+    /**
+     * Set the MinecraftNBT tag "sourceInventory" to be a BlockPos coordinates.
+     *
+     * @param capsule capsule stack
+     * @param dest    position to save as nbt into the capsule stack
+     * @param dimID   dimension where the position is.
+     */
+    public static void saveSourceInventory(ItemStack capsule, BlockPos dest, int dimID) {
+        if (!capsule.hasTagCompound()) {
+            capsule.setTagCompound(new NBTTagCompound());
+        }
+        NBTTagCompound pos = new NBTTagCompound();
+        if (dest != null) {
+            pos.setInteger("x", dest.getX());
+            pos.setInteger("y", dest.getY());
+            pos.setInteger("z", dest.getZ());
+            pos.setInteger("dim", dimID);
+        }
+        capsule.getTagCompound().setTag("sourceInventory", pos);
+    }
+
+    public static boolean hasSourceInventory(ItemStack capsule) {
+        if (!capsule.hasTagCompound()) {
+            capsule.setTagCompound(new NBTTagCompound());
+        }
+        return capsule.getTagCompound().hasKey("sourceInventory") && capsule.getTagCompound().getCompoundTag("sourceInventory").hasKey("x");
+    }
+
+    @Nullable
+    public static BlockPos getSourceInventoryLocation(ItemStack capsule) {
+        if (hasSourceInventory(capsule)) {
+            NBTTagCompound sourceInventory = capsule.getTagCompound().getCompoundTag("sourceInventory");
+            return new BlockPos(sourceInventory.getInteger("x"), sourceInventory.getInteger("y"), sourceInventory.getInteger("z"));
+        }
+        return null;
+    }
+
+    @Nullable
+    public static Integer getSourceInventoryDimension(ItemStack capsule) {
+        if (hasSourceInventory(capsule)) {
+            return capsule.getTagCompound().getCompoundTag("sourceInventory").getInteger("dim");
+        }
+        return null;
+    }
+
+    @Nullable
+    public static IItemHandler getSourceInventory(ItemStack blueprint, WorldServer w) {
+        BlockPos location = CapsuleItem.getSourceInventoryLocation(blueprint);
+        Integer dimension = CapsuleItem.getSourceInventoryDimension(blueprint);
+        if (location == null || dimension == null) return null;
+        WorldServer world = w.getMinecraftServer().getWorld(dimension);
+
+        TileEntity te = world.getTileEntity(location);
+        if (te != null && te.hasCapability(CapabilityItemHandler.ITEM_HANDLER_CAPABILITY, null)) {
+            return te.getCapability(CapabilityItemHandler.ITEM_HANDLER_CAPABILITY, null);
+        }
+        return null;
+    }
+
+    public static void setPlacement(ItemStack blueprint, PlacementSettings placementSettings) {
+        if (!blueprint.hasTagCompound()) {
+            blueprint.setTagCompound(new NBTTagCompound());
+        }
+        blueprint.getTagCompound().setString("rotation", placementSettings == null ? Rotation.NONE.name() : placementSettings.getRotation().name());
+        blueprint.getTagCompound().setString("mirror", placementSettings == null ? Mirror.NONE.name() : placementSettings.getMirror().name());
+    }
+
+    public static PlacementSettings getPlacement(ItemStack capsule) {
+        if (hasPlacement(capsule)) {
+            PlacementSettings placementSettings = new PlacementSettings()
+                    .setMirror(Mirror.valueOf(capsule.getTagCompound().getString("mirror")))
+                    .setRotation(Rotation.valueOf(capsule.getTagCompound().getString("rotation")))
+                    .setIgnoreEntities(false)
+                    .setChunk(null)
+                    .setReplacedBlock(null)
+                    .setIgnoreStructureBlock(false);
+            return placementSettings;
+        }
+        return new PlacementSettings();
+    }
+
+    public static boolean hasPlacement(ItemStack blueprint) {
+        if (!blueprint.hasTagCompound()) {
+            blueprint.setTagCompound(new NBTTagCompound());
+        }
+        return blueprint.getTagCompound().hasKey("mirror") && blueprint.getTagCompound().hasKey("rotation");
+    }
+
+    public static void clearCapsule(ItemStack capsule) {
         setState(capsule, STATE_EMPTY);
         if (!capsule.hasTagCompound()) return;
         capsule.getTagCompound().removeTag("structureName");
+        capsule.getTagCompound().removeTag("sourceInventory");
     }
-
-
 }

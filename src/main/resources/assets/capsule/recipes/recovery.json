@@ -1,0 +1,20 @@
+{
+  "type": "capsule:recovery_capsule",
+  "result": {
+    "item": "capsule:capsule",
+    "data": 5,
+    "nbt": {
+      "isReward": true,
+      "oneUse": true
+    }
+  },
+  "ingredients": [
+    {
+      "item": "capsule:capsule",
+      "data": 2
+    },
+    {
+      "item": "minecraft:glass_bottle"
+    }
+  ]
+}

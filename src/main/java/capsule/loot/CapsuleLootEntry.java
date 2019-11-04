@@ -2,6 +2,8 @@ package capsule.loot;
 
 import capsule.Config;
 import capsule.StructureSaver;
+import capsule.helpers.Capsule;
+import capsule.helpers.Files;
 import capsule.items.CapsuleItem;
 import capsule.structure.CapsuleTemplate;
 import com.google.gson.JsonObject;
@@ -14,6 +16,7 @@ import net.minecraft.world.storage.loot.conditions.LootConditionManager;
 import org.apache.commons.lang3.text.WordUtils;
 import org.apache.commons.lang3.tuple.Pair;
 
+import javax.annotation.Nullable;
 import java.util.Collection;
 import java.util.Random;
 
@@ -45,7 +48,7 @@ public class CapsuleLootEntry extends LootEntry {
     }
 
     /**
-     * Add all eligible capsules to the list to be picked from.
+     * Add all eligible capsuleList to the list to be picked from.
      */
     @Override
     public void addLoot(Collection<ItemStack> stacks, Random rand, LootContext context) {
@@ -59,29 +62,45 @@ public class CapsuleLootEntry extends LootEntry {
                 CapsuleTemplate template = templatePair.getRight();
                 String templatePath = templatePair.getLeft();
                 int size = Math.max(template.getSize().getX(), Math.max(template.getSize().getY(), template.getSize().getZ()));
-                String[] path = templatePath.split("/");
-                if (path.length == 0)
-                    return;
 
-                ItemStack capsule = CapsuleItem.createRewardCapsule(
-                        templatePath,
-                        getRandomColor(),
-                        getRandomColor(),
-                        size,
-                        WordUtils.capitalize(path[path.length - 1]),
-                        template.getAuthor());
-
-                stacks.add(capsule);
+                if (template.entities.isEmpty() && Config.allowBlueprintReward) {
+                    // blueprint if there is no entities in the capsule
+                    ItemStack capsule = Capsule.newLinkedCapsuleItemStack(
+                            templatePath,
+                            getRandomColor(),
+                            getRandomColor(),
+                            size,
+                            false,
+                            Capsule.labelFromPath(templatePath),
+                            0);
+                    CapsuleItem.setAuthor(capsule, template.getAuthor());
+                    CapsuleItem.setState(capsule, CapsuleItem.STATE_BLUEPRINT);
+                    CapsuleItem.setBlueprint(capsule);
+                    CapsuleItem.setCanRotate(capsule, template.canRotate());
+                    stacks.add(capsule);
+                } else {
+                    // one use if there are entities and a risk of dupe
+                    ItemStack capsule = Capsule.newRewardCapsuleItemStack(
+                            templatePath,
+                            getRandomColor(),
+                            getRandomColor(),
+                            size,
+                            Capsule.labelFromPath(templatePath),
+                            template.getAuthor());
+                    CapsuleItem.setCanRotate(capsule, template.canRotate());
+                    stacks.add(capsule);
+                }
             }
 
         }
 
     }
 
+    @Nullable
     public Pair<String, CapsuleTemplate> getRandomTemplate(LootContext context) {
         LootPathData lpd = Config.lootTemplatesData.get(this.templatesPath);
         if (lpd == null || lpd.files == null) {
-            StructureSaver.loadLootList(context.getWorld().getMinecraftServer());
+            Files.populateAndLoadLootList(Config.configDir, Config.lootTemplatesPaths, Config.lootTemplatesData);
             lpd = Config.lootTemplatesData.get(this.templatesPath);
         }
         if (lpd == null || lpd.files == null || lpd.files.isEmpty()) return null;
