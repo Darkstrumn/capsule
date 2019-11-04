@@ -1,0 +1,50 @@
+{
+  "type": "capsule:blueprint_capsule",
+  "result": {
+    "item": "capsule:capsule",
+    "data": 3,
+    "nbt": {
+      "display": {
+        "color": 3949738
+      },
+      "sourceInventory": {},
+      "structureName": "blueprintExampleStructureName"
+    }
+  },
+  "pattern": [
+    " b ",
+    "lcl",
+    " p "
+  ],
+  "key": {
+    "c": [
+      {
+        "item": "capsule:capsule",
+        "data": 2,
+        "nbt": {
+          "structureName": ""
+        }
+      },
+      {
+        "item": "capsule:capsule",
+        "data": 5,
+        "nbt": {
+          "structureName": "",
+          "oneUse": true,
+          "isReward": true
+        }
+      }
+    ],
+    "b": {
+      "item": "minecraft:stone_button"
+    },
+    "p": {
+      "item": "minecraft:paper",
+      "data": 0
+    },
+    "l": {
+      "type": "forge:ore_dict",
+      "ore": "dyeBlue"
+    }
+  }
+}

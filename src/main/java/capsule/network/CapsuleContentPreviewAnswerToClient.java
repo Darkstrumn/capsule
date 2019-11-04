@@ -1,6 +1,7 @@
 package capsule.network;
 
 import io.netty.buffer.ByteBuf;
+import net.minecraft.util.math.AxisAlignedBB;
 import net.minecraft.util.math.BlockPos;
 import net.minecraftforge.fml.common.network.ByteBufUtils;
 import net.minecraftforge.fml.common.network.simpleimpl.IMessage;
@@ -17,14 +18,12 @@ public class CapsuleContentPreviewAnswerToClient implements IMessage {
 
     protected static final Logger LOGGER = LogManager.getLogger(CapsuleContentPreviewAnswerToClient.class);
 
-    private List<BlockPos> blockPositions = null;
-
-
+    private List<AxisAlignedBB> boundingBoxes = null;
     private String structureName = null;
 
 
-    public CapsuleContentPreviewAnswerToClient(List<BlockPos> blockPositions, String structureName) {
-        this.blockPositions = blockPositions;
+    public CapsuleContentPreviewAnswerToClient(List<AxisAlignedBB> boundingBoxes, String structureName) {
+        this.boundingBoxes = boundingBoxes;
         this.structureName = structureName;
     }
 
@@ -44,14 +43,20 @@ public class CapsuleContentPreviewAnswerToClient implements IMessage {
         try {
             // these methods may also be of use for your code:
             // for Itemstacks - ByteBufUtils.readItemStack()
-            // for NBT tags ByteBufUtils.readTag();
+            // for MinecraftNBT tags ByteBufUtils.readTag();
             // for Strings: ByteBufUtils.readUTF8String();
-            int size = buf.readShort();
-            this.blockPositions = new ArrayList<>(size);
-            for (int i = 0; i < size; i++) {
-                this.blockPositions.add(BlockPos.fromLong(buf.readLong()));
-            }
             this.structureName = ByteBufUtils.readUTF8String(buf);
+            int size = buf.readShort();
+            this.boundingBoxes = new ArrayList<>(size);
+            for (int i = 0; i < size; i++) {
+                boolean isSingleBlock = buf.readBoolean();
+                if (isSingleBlock) {
+                    BlockPos p = BlockPos.fromLong(buf.readLong());
+                    this.boundingBoxes.add(new AxisAlignedBB(p, p));
+                } else {
+                    this.boundingBoxes.add(new AxisAlignedBB(BlockPos.fromLong(buf.readLong()), BlockPos.fromLong(buf.readLong())));
+                }
+            }
 
         } catch (IndexOutOfBoundsException ioe) {
             LOGGER.error("Exception while reading CapsuleContentPreviewMessageToClient: " + ioe);
@@ -71,22 +76,29 @@ public class CapsuleContentPreviewAnswerToClient implements IMessage {
 
         // these methods may also be of use for your code:
         // for Itemstacks - ByteBufUtils.writeItemStack()
-        // for NBT tags ByteBufUtils.writeTag();
+        // for MinecraftNBT tags ByteBufUtils.writeTag();
         // for Strings: ByteBufUtils.writeUTF8String();
-        buf.writeShort(this.blockPositions.size());
-        for (BlockPos pos : this.blockPositions) {
-            buf.writeLong(pos.toLong());
-        }
         ByteBufUtils.writeUTF8String(buf, this.structureName);
+        int size = Math.min(this.boundingBoxes.size(), Short.MAX_VALUE);
+        buf.writeShort(size);
+        for (int i = 0; i < size; i++) {
+            AxisAlignedBB bb = boundingBoxes.get(i);
+            boolean isSingleBlock = bb.getAverageEdgeLength() == 0;
+            buf.writeBoolean(isSingleBlock);
+            buf.writeLong(new BlockPos(bb.minX, bb.minY, bb.minZ).toLong());
+            if (!isSingleBlock) {
+                buf.writeLong(new BlockPos(bb.maxX, bb.maxY, bb.maxZ).toLong());
+            }
+        }
     }
 
     @Override
     public String toString() {
-        return "CapsuleContentPreviewMessageToClient";
+        return getClass().toString();
     }
 
-    public List<BlockPos> getBlockPositions() {
-        return blockPositions;
+    public List<AxisAlignedBB> getBoundingBoxes() {
+        return boundingBoxes;
     }
 
     public String getStructureName() {

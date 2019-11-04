@@ -16,8 +16,8 @@ import java.io.*;
 import java.util.Map;
 
 /**
- * Exact copy of mc original net.minecraft.world.gen.structure.template.TemplateManager, but using CapsuleTemplate instead and custom jar source folder.
- * @author Lythom
+ * Initiated from mc original net.minecraft.world.gen.structure.template.TemplateManager, but using CapsuleTemplate instead and custom jar source folder.
+ * Added support to load schematic file as Template.
  */
 public class CapsuleTemplateManager
 {
@@ -83,7 +83,8 @@ public class CapsuleTemplateManager
 
         if (!file1.exists())
         {
-            return this.readTemplateFromJar(server);
+            // first try to read from schematic. If not working try from jar
+            return this.readTemplateFromSchematic(server) || this.readTemplateFromJar(server);
         }
         else
         {
@@ -94,7 +95,7 @@ public class CapsuleTemplateManager
             {
                 inputstream = new FileInputStream(file1);
                 this.readTemplateFromStream(s, inputstream);
-                return true;
+                flag = true;
             }
             catch (Throwable var10)
             {
@@ -124,7 +125,7 @@ public class CapsuleTemplateManager
             LOGGER.info("reading from jar at" + "/" + s1 + ".nbt");
             inputstream = MinecraftServer.class.getResourceAsStream("/" + s1 + ".nbt");
             this.readTemplateFromStream(s1, inputstream);
-            return true;
+            flag = true;
         }
         catch (Throwable var10)
         {
@@ -188,10 +189,11 @@ public class CapsuleTemplateManager
                 NBTTagCompound nbttagcompound = template.writeToNBT(new NBTTagCompound());
                 outputstream = new FileOutputStream(file2);
                 CompressedStreamTools.writeCompressed(nbttagcompound, outputstream);
-                return true;
+                flag = true;
             }
             catch (Throwable var13)
             {
+                LOGGER.error(var13);
                 flag = false;
             }
             finally
@@ -210,5 +212,63 @@ public class CapsuleTemplateManager
     public void remove(ResourceLocation templatePath)
     {
         this.templates.remove(templatePath.getResourcePath());
+    }
+
+    public boolean readTemplateFromSchematic(ResourceLocation server)
+    {
+        String s = server.getResourcePath();
+        File file1 = new File(this.baseFolder, s + ".schematic");
+
+        if (!file1.exists())
+        {
+            return false;
+        }
+        else
+        {
+            InputStream inputstream = null;
+            boolean flag;
+
+            try
+            {
+                inputstream = new FileInputStream(file1);
+                NBTTagCompound schematicNBT = CompressedStreamTools.readCompressed(inputstream);
+                CapsuleTemplate template = new CapsuleTemplate();
+                template.readSchematic(schematicNBT);
+                this.templates.put(s, template);
+                flag = true;
+            }
+            catch (Throwable var10)
+            {
+                flag = false;
+            }
+            finally
+            {
+                IOUtils.closeQuietly(inputstream);
+            }
+
+            return flag;
+        }
+    }
+
+    public boolean deleteTemplate(@Nullable MinecraftServer server, ResourceLocation id) {
+        String s = id.getResourcePath();
+
+        if (server != null && this.templates.containsKey(s)) {
+            File file1 = new File(this.baseFolder);
+
+            if (!file1.exists()) {
+                return true;
+            } else if (!file1.isDirectory()) {
+                return true;
+            }
+
+            File file2 = new File(file1, s + ".nbt");
+            boolean deleted = file2.delete();
+            if (deleted) {
+                remove(id);
+            }
+            return deleted;
+        }
+        return false;
     }
 }

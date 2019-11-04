@@ -4,7 +4,9 @@
     "recipes": [
       "capsule:capsule_iron",
       "capsule:capsule_gold",
-      "capsule:capsule_diamond"
+      "capsule:capsule_diamond",
+      "capsule:capsule_obsidian",
+      "capsule:capsule_emerald"
     ]
   },
   "criteria": {

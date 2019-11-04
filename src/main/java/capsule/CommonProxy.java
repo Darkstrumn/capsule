@@ -3,9 +3,17 @@ package capsule;
 import capsule.blocks.CapsuleBlocks;
 import capsule.command.CapsuleCommand;
 import capsule.enchantments.Enchantments;
+import capsule.helpers.Files;
 import capsule.items.CapsuleItems;
 import capsule.loot.CapsuleLootTableHook;
+import capsule.loot.StarterLoot;
 import capsule.network.*;
+import capsule.network.client.CapsuleContentPreviewAnswerHandler;
+import capsule.network.client.CapsuleUndeployNotifHandler;
+import capsule.network.server.CapsuleContentPreviewQueryHandler;
+import capsule.network.server.CapsuleLeftClickQueryHandler;
+import capsule.network.server.CapsuleThrowQueryHandler;
+import capsule.network.server.LabelEditedMessageToServerHandler;
 import net.minecraft.block.Block;
 import net.minecraft.enchantment.Enchantment;
 import net.minecraft.entity.player.EntityPlayer;
@@ -23,6 +31,9 @@ import net.minecraftforge.fml.common.eventhandler.SubscribeEvent;
 import net.minecraftforge.fml.common.network.NetworkRegistry;
 import net.minecraftforge.fml.common.network.simpleimpl.SimpleNetworkWrapper;
 import net.minecraftforge.fml.relauncher.Side;
+
+import java.io.File;
+import java.util.ArrayList;
 
 @Mod.EventBusSubscriber
 public class CommonProxy {
@@ -43,7 +54,8 @@ public class CommonProxy {
 
     @SubscribeEvent
     public static void registerRecipes(RegistryEvent.Register<IRecipe> event) {
-        CapsuleItems.registerRecipes(event);
+        ArrayList<String> prefabsTemplatesList = Files.populatePrefabs(Config.configDir, Config.prefabsTemplatesPath);
+        CapsuleItems.registerRecipes(event, prefabsTemplatesList);
         // + other recipes in assets.capsule.recipes
     }
 
@@ -53,43 +65,57 @@ public class CommonProxy {
     }
 
     public void preInit(FMLPreInitializationEvent event) {
+        Config.configDir = new File(event.getModConfigurationDirectory(), "capsule");
         Configuration config = new Configuration(event.getSuggestedConfigurationFile());
         Config.readConfig(config);
         Config.initLootConfigs();
-        Config.initReceipeConfigs();
+        Config.initRecipesConfigs();
         Config.initEnchantsConfigs();
+
+        // copy default config and structures to config/capsule folder, and load them in Config.
+        refreshConfigTemplates();
 
         // network stuff
         simpleNetworkWrapper = NetworkRegistry.INSTANCE.newSimpleChannel("CapsuleChannel");
         // client ask server to edit capsule label
-        simpleNetworkWrapper.registerMessage(LabelEditedMessageToServerMessageHandler.class, LabelEditedMessageToServer.class, CAPSULE_CHANNEL_MESSAGE_ID++, Side.SERVER);
+        simpleNetworkWrapper.registerMessage(LabelEditedMessageToServerHandler.class, LabelEditedMessageToServer.class, CAPSULE_CHANNEL_MESSAGE_ID++, Side.SERVER);
         // client ask server data needed to preview a deploy
         simpleNetworkWrapper.registerMessage(CapsuleContentPreviewQueryHandler.class, CapsuleContentPreviewQueryToServer.class, CAPSULE_CHANNEL_MESSAGE_ID++, Side.SERVER);
         // client ask server to throw item to a specific position
         simpleNetworkWrapper.registerMessage(CapsuleThrowQueryHandler.class, CapsuleThrowQueryToServer.class, CAPSULE_CHANNEL_MESSAGE_ID++, Side.SERVER);
+        // client ask server to reload the held blueprint capsule
+        simpleNetworkWrapper.registerMessage(CapsuleLeftClickQueryHandler.class, CapsuleLeftClickQueryToServer.class, CAPSULE_CHANNEL_MESSAGE_ID++, Side.SERVER);
         // server sends to client the data needed to preview a deploy
         simpleNetworkWrapper.registerMessage(CapsuleContentPreviewAnswerHandler.class, CapsuleContentPreviewAnswerToClient.class, CAPSULE_CHANNEL_MESSAGE_ID++, Side.CLIENT);
+        // server sends to client the data needed to render undeploy
+        simpleNetworkWrapper.registerMessage(CapsuleUndeployNotifHandler.class, CapsuleUndeployNotifToClient.class, CAPSULE_CHANNEL_MESSAGE_ID++, Side.CLIENT);
+    }
+
+    public void refreshConfigTemplates() {
+        Files.populateAndLoadLootList(Config.configDir, Config.lootTemplatesPaths, Config.lootTemplatesData);
+        Config.starterTemplatesList = Files.populateStarters(Config.configDir, Config.starterTemplatesPath);
+        Config.blueprintWhitelist = Files.populateWhitelistConfig(Config.configDir);
     }
 
     public void init(FMLInitializationEvent event) {
         MinecraftForge.EVENT_BUS.register(Enchantments.recallEnchant);
+        MinecraftForge.EVENT_BUS.register(CapsuleItems.capsule);
+        MinecraftForge.EVENT_BUS.register(StarterLoot.instance);
     }
 
     public void postInit(FMLPostInitializationEvent event) {
         Config.initCaptureConfigs();
-        Config.config.save();
         if (Config.config.hasChanged()) {
             Config.config.save();
         }
 
         CapsuleLootTableHook lootTableHook = new CapsuleLootTableHook();
         MinecraftForge.EVENT_BUS.register(lootTableHook);
-
     }
 
     public void serverStarting(FMLServerStartingEvent e) {
         e.registerServerCommand(new CapsuleCommand());
-        StructureSaver.loadLootList(e.getServer());
+        refreshConfigTemplates();
     }
 
     public void openGuiScreen(EntityPlayer playerIn) {

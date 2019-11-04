@@ -1,0 +1,40 @@
+{
+  "type": "capsule:capsule",
+  "conditions": [
+    {
+      "type": "capsule:is_enabled",
+      "property": "woodCapsuleSize"
+    }
+  ],
+  "result": {
+    "type": "minecraft:item_nbt",
+    "item": "capsule:capsule",
+    "data": 0,
+    "nbt": {
+      "color": 12359778,
+      "size": 1,
+      "display": {
+        "color": 11833434
+      }
+    }
+  },
+  "pattern": [
+    " b ",
+    "#e#",
+    " i "
+  ],
+  "key": {
+    "#": {
+      "item": "#plankWood"
+    },
+    "b": {
+      "item": "minecraft:stone_button"
+    },
+    "e": {
+      "item": "#chest"
+    },
+    "i": {
+      "item": "#slabWood"
+    }
+  }
+}

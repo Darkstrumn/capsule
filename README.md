@@ -2,13 +2,89 @@
 
 Bring your base! Capsules can capture a region containing any blocks or machines, then deploy and undeploy at will. Inspired by Dragon Ball capsules.
 
-## Mod page ##
+## Mod page and downloads ##
 [https://minecraft.curseforge.com/projects/capsule](https://minecraft.curseforge.com/projects/capsule)
 
 ## Wiki ##
 [https://github.com/Lythom/capsule/wiki](https://github.com/Lythom/capsule/wiki)
 
 ## Changelog ##
+
+**1.12.2-3.2.102 : loot reward **
+
+- [Community suggestion] Add configuration to force one-use capsules over precharged blueprint as dungeon chests loots. [Thanks to TheQKnight](https://www.curseforge.com/minecraft/mc-mods/capsule#c158).
+
+
+**1.12.2-3.2.101 : recipe fix**
+
+- [Community report] Fix "clear capsule" recipe that can make strange conversions. [Thanks to Ghoul-Generator](https://github.com/Lythom/capsule/issues/13).
+
+
+**1.12.2-3.2.100 : Modpacker's daydream update**
+
+First an update notice: 
+- some incompatible mods have been identified and added to configuration, please remove the `excludedBlocks` and `opExcludedBlocks` entries in your `config/capsule.cfg` so that they regenerates. Sorry gregtech machines, superfactorymanager and refined storage, you can't go into capsules.
+- New loot included! Remove the `config/capsule/loot` folder to generate the new loots !
+
+Now the cool stuff!    
+New options for modpack makers!
+- You can give the player recipes for pre-configured blueprint.
+    - Once the blueprint is crafted (ie. Immersive Engineering Arc Furnace blueprint), the player only have to gather the materials to be able to deploy the structure. 
+    - Rotation, mirror and undo are possibles so it makes it very easy to try and place correctly a multiblock. 
+    - Any structure can easily be added as pre-configured blueprint, recipes are generated automatically! See [https://github.com/Lythom/capsule/wiki/Modpack-making#add-a-preconfigured-blueprint](https://github.com/Lythom/capsule/wiki/Modpack-making#add-a-preconfigured-blueprint) for more information.
+- You can give the player starter(s) preloaded caspule.
+    - Default starter is a small house designed to serve as mobile base but it can be removed or changed. See [https://github.com/Lythom/capsule/wiki/Modpack-making#how-to-give-one](https://github.com/Lythom/capsule/wiki/Modpack-making#how-to-give-one) for more information.
+    
+Full changelist and fixes :
+- Add rotation and mirror to standard capsule if their content support it (ie. basic block or whitelisted tile entity).
+- Add starter capsule mechanic and a default starter.
+- Add new loots ! Remove the `config/capsule/loot` folder to get the new ones !
+- Add Loot now can be charged (pre-filled) blueprints instead of one use capsules.
+- Add preconfigured blueprint recipes. Check JEI for blueprints ! Blocks used in the structure are given back.
+- Add Immersive engineering, Immersive Tech and Immersive Petroleum multiblocks as preconfigured blueprint (only when the mod is loaded).
+- Add a few vanilla based preconfigured blueprints.
+- Add a [whitelist](https://github.com/Lythom/capsule/wiki/Modpack-making#whitelist) mechanic to allow more blocks to be used in blueprints.
+- Add fluid support in blueprints (only through buckets for now).
+- Add [giveBlueprint](https://github.com/Lythom/capsule/wiki/Commands#giveblueprint) command.
+- Add [giveLinked](https://github.com/Lythom/capsule/wiki/Commands#givelinked) command.
+- Add optional "playerName" argument to all relevant commands to give any kind of capsule to any player.
+- Improve tooltip display for all capsules..
+- Revert forge version dependency to latest recommended (14.23.5.2768).
+- Blueprints capsule can now be crafted not only from standard capsule but also from reward, recovery and other blueprint capsules.
+- Recovery capsule recipe is shapeless again.
+- Improve JEI recipes and descriptions.
+- Update excludedBlocks for newly discovered incompatibilities. please remove the `excludedBlocks` and `opExcludedBlocks` entries in your `config/capsule.cfg` so that they regenerates.
+- Fix a bug where ":" in the label of a reward would mess the structure file location.
+- Fix entity rotation (ie. item frames or armor stands)
+
+**1.12.2-3.2.91 : Builder's daydream update**
+
+New options for builders ! Blueprints makes it fast to build patterned constructions like bridges, walls, or dungeons with the ability to deploy a template using materials from chest or player inventory. The template can be rotated and mirrored to fit any situation !
+
+* New type of capsule : the blueprint ! Allow to deloy several times the same template using materials from any kind of chest or from player inventory.
+    * Blueprint copies the template of the capsule they are crafted with. Original capsule is not consumed.
+    * Blueprint allows rotation and mirror of the structure using left click and sneak + left click.
+    * Blueprint are recharged using left click in the air.
+    * Last blueprint deployment can be undeployed as long as the blueprint is not recharged and the deployed blocks has not been modified.
+    * Unlike standard capsules, blueprints are limited to non-entities blocks. Ie. torches, doors and redstone wires are allowed but chests, furnaces or paintings will be ignored in the blueprint template.
+* [Community suggestion] Add particles on deploy and undeploy. https://github.com/Lythom/capsule/issues/9.
+* [Community suggestion] Add optional "player" argument to fromExistingReward and fromStructure commands. It makes it possible to configure vending machines or structure blocks to give a specific template to a secific player. https://github.com/Lythom/capsule/issues/11.
+* [Community suggestion] Players don't prevent deployment anymore, instead the player is teleported to the deployed structure nearest floor.
+* Add a new starter capsule of size 1 that only requires wood to be used.
+* Add new capsules sizes: 3 (iron), 5 (gold), 7 (diamond), 9 (obsidian) and 11 (emerald).
+* Add instant mode for blueprints and capsules of size 1 : they continuously display content preview and deploy instantly on right click.
+* Add recipe to clear a deployed capsule: deployed content stays in the world and the capsule become empty again.
+* Improve preview of capsule deployment: deployment can be previewed from further away and similar blocks are displayed together.
+* Fix capsule size configuration ignored. 0 or negative value will not correctly disable the capsule, and any positive integer will be used by the recipe.
+* Migrate recipe system to 1.12 json recipes. It allows via resource pack to override or add recipes for empty capsules, upgrade ingrendients, recovery capsule, blueprint capsule. 
+* [Experimental] Add schematic support for reward capsules. You can creat reward from .schematic files in the reward folder.
+* [Experimental] Automatically infer configuration for overridable blocks of other mods. Blocks whose name include "leave", "sapling", "mushroom", or "vine" will be automatically added to overrideable list.
+* Raised the max capsule size hard limit to 255 (from 31). Default configuration allows capsules to be upgraded up to 31. It is not advised to go bigger since the performance hit for the server can be important, but it can be used to offer the player bigger structures as reward for example.
+* Fix trying to undeploy near max height limit will correctly prevent deploy.
+* Fix loot files name (lowercase only).
+* Update JEI recipes and "information" tab for each kind of capsule.
+* Update forge to 1.12.2-14.23.5.2781
+* Update JEI API to 1.12.2-4.15.0.268
 
 **1.12.2-3.1.68 : Important bug fix**
 
@@ -19,8 +95,8 @@ Bring your base! Capsules can capture a region containing any blocks or machines
 **1.12.2-3.1.63 : Water and loot fine tuning**
 
 * New Water behaviour : Capsules now deploys on surface of water (or liquids), unless the thrower is immerged in the liquid itself.
-* Configurable loot tables. A new entry in the config file (lootTablesList) allows to configure where reward capsule will spawn.
-* Removed gameplay/fishing/treasure from default loot tables (can be re-added trough config).
+* Add configurable loot tables. A new entry in the config file (lootTablesList) allows to configure where reward capsule will spawn.
+* Remove gameplay/fishing/treasure from default loot tables (can be re-added trough config).
 * Update forge to 1.12.2-14.23.0.2550
 * Update JEI API to 1.12.2-4.8.0.114
 
@@ -166,5 +242,4 @@ Blocks :
 
 ## Planned ##
 
-* Blueprint capsules that can be loaded with material and then spawn several times the same pattern
 * Capsule shirts, Capsules banner logo (idea of AlexisMachina)

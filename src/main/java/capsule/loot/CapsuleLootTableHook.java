@@ -3,14 +3,12 @@ package capsule.loot;
 import capsule.Config;
 import net.minecraft.world.storage.loot.LootEntry;
 import net.minecraft.world.storage.loot.LootPool;
-import net.minecraft.world.storage.loot.LootTableList;
 import net.minecraft.world.storage.loot.RandomValueRange;
 import net.minecraft.world.storage.loot.conditions.LootCondition;
 import net.minecraftforge.event.LootTableLoadEvent;
 import net.minecraftforge.fml.common.eventhandler.SubscribeEvent;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 
 public class CapsuleLootTableHook {
@@ -41,7 +39,7 @@ public class CapsuleLootTableHook {
                     entries.toArray(new LootEntry[0]),    // the loot is taken from a Capsule managed entry list
                     new LootCondition[0],                // no particular condition, always loot one capsule
                     new RandomValueRange(1.0F, 1.0F),    // spawn one capsule using that pool
-                    new RandomValueRange(0.0F, 0.0F),    // no extra capsules
+                    new RandomValueRange(0.0F, 0.0F),    // no extra capsuleList
                     "capsulePool");
         }
 
