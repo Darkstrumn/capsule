@@ -1,8 +1,0 @@
-{
-  "type": "capsule:upgrade_capsule",
-  "ingredients": [
-    {
-      "item": "minecraft:chorus_fruit_popped"
-    }
-  ]
-}

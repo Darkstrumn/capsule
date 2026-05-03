@@ -1,41 +1,24 @@
 package capsule.network;
 
+import capsule.CapsuleMod;
 import io.netty.buffer.ByteBuf;
-import net.minecraftforge.fml.common.network.simpleimpl.IMessage;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.resources.ResourceLocation;
 
-/**
- * This Network Message is sent from the client to the server
- */
-public class CapsuleLeftClickQueryToServer implements IMessage {
+public record CapsuleLeftClickQueryToServer() implements CustomPacketPayload {
+    public static final CustomPacketPayload.Type<CapsuleLeftClickQueryToServer> TYPE =
+            new CustomPacketPayload.Type<>(ResourceLocation.fromNamespaceAndPath(CapsuleMod.MODID, "left_click_query"));
 
-    // for use by the message handler only.
-    public CapsuleLeftClickQueryToServer() {
+    public static final StreamCodec<ByteBuf, CapsuleLeftClickQueryToServer> STREAM_CODEC =
+            StreamCodec.of(
+                    (buf, msg) -> {},
+                    buf -> new CapsuleLeftClickQueryToServer()
+            );
 
-    }
-
-    /**
-     * Called by the network code once it has received the message bytes over
-     * the network. Used to read the ByteBuf contents into your member variables
-     *
-     * @param buf
-     */
     @Override
-    public void fromBytes(ByteBuf buf) {
-    }
-
-    /**
-     * Called by the network code. Used to write the contents of your message
-     * member variables into the ByteBuf, ready for transmission over the
-     * network.
-     *
-     * @param buf
-     */
-    @Override
-    public void toBytes(ByteBuf buf) {
-    }
-
-    public boolean isMessageValid() {
-        return true;
+    public CustomPacketPayload.Type<CapsuleLeftClickQueryToServer> type() {
+        return TYPE;
     }
 
     @Override

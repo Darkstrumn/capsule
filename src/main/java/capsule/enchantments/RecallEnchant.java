@@ -1,86 +1,56 @@
 package capsule.enchantments;
 
+import capsule.CapsuleMod;
 import capsule.helpers.Spacial;
-import capsule.items.CapsuleItem;
-import com.google.common.base.Strings;
-import net.minecraft.enchantment.Enchantment;
-import net.minecraft.enchantment.EnumEnchantmentType;
-import net.minecraft.entity.item.EntityItem;
-import net.minecraft.entity.player.EntityPlayer;
-import net.minecraft.inventory.EntityEquipmentSlot;
-import net.minecraft.item.ItemStack;
-import net.minecraft.util.ResourceLocation;
-import net.minecraft.world.WorldServer;
-import net.minecraftforge.fml.common.eventhandler.SubscribeEvent;
-import net.minecraftforge.fml.common.gameevent.TickEvent.Phase;
-import net.minecraftforge.fml.common.gameevent.TickEvent.WorldTickEvent;
-import net.minecraftforge.fml.relauncher.Side;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.entity.player.Player;
+import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.fml.common.EventBusSubscriber;
+import net.neoforged.neoforge.event.tick.LevelTickEvent;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 import java.util.List;
+import java.util.Objects;
 
-public class RecallEnchant extends Enchantment {
+@EventBusSubscriber(modid = CapsuleMod.MODID)
+public class RecallEnchant {
+    protected static final Logger LOGGER = LogManager.getLogger(RecallEnchant.class);
 
-    protected RecallEnchant(ResourceLocation enchName, Rarity rarity, EnumEnchantmentType enchType) {
-        super(rarity, enchType, EntityEquipmentSlot.values());
-        this.setName("recall");
-        this.setRegistryName(enchName);
-    }
-
-    @Override
-    public boolean canApply(ItemStack stack) {
-        return canApplyAtEnchantingTable(stack);
-    }
-
-    @Override
-    public boolean canApplyAtEnchantingTable(ItemStack stack) {
-        return stack.getItem() instanceof CapsuleItem || this.type != null && super.canApplyAtEnchantingTable(stack);
-    }
-
-    @Override
-    public int getMinEnchantability(int enchantmentLevel) {
-        return 1;
-    }
-
-    @Override
-    public int getMaxEnchantability(int enchantmentLevel) {
-        return this.getMinEnchantability(enchantmentLevel) + 40;
-    }
-
-    @Override
-    public int getMaxLevel() {
-        return 1;
-    }
-
-    public void pickupItemBack(EntityItem entity, EntityPlayer player) {
-
+    public static void pickupItemBack(ItemEntity entity, Player player) {
         if (player != null) {
-            entity.setNoPickupDelay();
-            entity.onCollideWithPlayer(player);
+            entity.setNoPickUpDelay();
+            entity.playerTouch(player);
         }
-
     }
 
     @SubscribeEvent
-    public void onWorldTickEvent(WorldTickEvent wte) {
-
-        if (wte.side == Side.CLIENT || wte.phase != Phase.END)
+    public static void onWorldTickEvent(LevelTickEvent.Post event) {
+        if (event.getLevel().isClientSide())
             return;
 
-        WorldServer world = (WorldServer) wte.world;
-        @SuppressWarnings("unchecked")
-        List<EntityItem> recallEntities = world.<EntityItem>getEntities(EntityItem.class, Enchantments.hasRecallEnchant::test);
-        for (EntityItem entity : recallEntities) {
-            if (!Strings.isNullOrEmpty(entity.getThrower()) && (entity.collided || Spacial.entityItemShouldAndCollideLiquid(entity))) {
+        ServerLevel world = (ServerLevel) event.getLevel();
+        List<? extends ItemEntity> recallEntities = world.getEntities(EntityType.ITEM, CapsuleEnchantments.hasRecallEnchant);
+        List<ItemEntity> recallItemEntities = recallEntities.stream()
+                .filter(Objects::nonNull)
+                .map(entity -> (ItemEntity) entity)
+                .toList();
+
+        for (ItemEntity entity : recallItemEntities) {
+            Entity owner = entity.getOwner();
+            if (owner != null && (entity.horizontalCollision || entity.verticalCollision || Spacial.ItemEntityShouldAndCollideLiquid(entity))) {
                 // give the item a last tick
                 if (!entity.isInLava()) {
-                    entity.onUpdate();
+                    entity.tick();
                 }
                 // then recall to inventory
-                if (!entity.isDead) {
-                    this.pickupItemBack(entity, world.getPlayerEntityByName(entity.getThrower()));
+                if (entity.isAlive()) {
+                    pickupItemBack(entity, world.getPlayerByUUID(owner.getUUID()));
                 }
             }
         }
     }
-
 }

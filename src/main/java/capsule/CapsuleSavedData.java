@@ -1,36 +1,35 @@
 package capsule;
 
-import net.minecraft.nbt.NBTTagCompound;
-import net.minecraft.world.storage.WorldSavedData;
+import net.minecraft.core.HolderLookup;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.world.level.saveddata.SavedData;
 
 /**
  * @author Lythom
  */
-public class CapsuleSavedData extends WorldSavedData {
+public class CapsuleSavedData extends SavedData {
 
     private int capsuleCounter = 0;
 
-    /**
-     * @param name
-     */
-    public CapsuleSavedData(String name) {
-        super(name);
+    public CapsuleSavedData() {
+        super();
     }
 
-    @Override
-    public void readFromNBT(NBTTagCompound nbt) {
+    public static CapsuleSavedData load(CompoundTag nbt, HolderLookup.Provider registries) {
         // retrieve lastReservedPosition
-        capsuleCounter = nbt.getInteger("counter");
+        CapsuleSavedData data = new CapsuleSavedData();
+        data.capsuleCounter = nbt.getInt("counter");
+        return data;
     }
 
     @Override
-    public NBTTagCompound writeToNBT(NBTTagCompound nbt) {
-        nbt.setInteger("counter", capsuleCounter);
+    public CompoundTag save(CompoundTag nbt, HolderLookup.Provider registries) {
+        nbt.putInt("counter", capsuleCounter);
         return nbt;
     }
 
     public int getNextCount() {
-        this.markDirty();
+        this.setDirty();
         return capsuleCounter++;
     }
 

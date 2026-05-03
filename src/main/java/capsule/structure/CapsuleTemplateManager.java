@@ -1,271 +1,209 @@
 package capsule.structure;
 
+import capsule.CapsuleMod;
 import com.google.common.collect.Maps;
-import net.minecraft.nbt.CompressedStreamTools;
-import net.minecraft.nbt.NBTTagCompound;
-import net.minecraft.server.MinecraftServer;
-import net.minecraft.util.ResourceLocation;
-import net.minecraft.util.datafix.DataFixer;
-import net.minecraft.util.datafix.FixTypes;
-import org.apache.commons.io.IOUtils;
+import com.mojang.datafixers.DataFixer;
+import net.minecraft.FileUtil;
+import net.minecraft.ResourceLocationException;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.NbtAccounter;
+import net.minecraft.nbt.NbtIo;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.packs.resources.Resource;
+import net.minecraft.server.packs.resources.ResourceManager;
+import net.minecraft.util.datafix.DataFixTypes;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import javax.annotation.Nullable;
-import java.io.*;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Map;
+import java.util.Optional;
 
 /**
- * Initiated from mc original net.minecraft.world.gen.structure.template.TemplateManager, but using CapsuleTemplate instead and custom jar source folder.
+ * Initiated from mc original net.minecraft.world.gen.feature.template.TemplateManager, but using CapsuleTemplate instead and custom jar source folder.
  * Added support to load schematic file as Template.
  */
-public class CapsuleTemplateManager
-{
-    protected static final Logger LOGGER = LogManager.getLogger(CapsuleTemplateManager.class);
-
-    private final Map<String, CapsuleTemplate> templates = Maps.<String, CapsuleTemplate>newHashMap();
-    /** the folder in the assets folder where the structure templates are found. */
-    private final String baseFolder;
+public class CapsuleTemplateManager {
+    private static final Logger LOGGER = LogManager.getLogger();
+    private final Map<ResourceLocation, CapsuleTemplate> templates = Maps.newHashMap();
     private final DataFixer fixer;
+    private ResourceManager resourceManager;
+    private final Path pathGenerated;
 
-    public CapsuleTemplateManager(String p_i47239_1_, DataFixer p_i47239_2_)
-    {
-        this.baseFolder = p_i47239_1_;
-        this.fixer = p_i47239_2_;
+    public CapsuleTemplateManager(ResourceManager resourceManager, File templateFolder, DataFixer fixerIn) {
+        this.resourceManager = resourceManager;
+        this.fixer = fixerIn;
+        this.pathGenerated = templateFolder.toPath().normalize();
     }
 
-    public CapsuleTemplate getTemplate(@Nullable MinecraftServer server, ResourceLocation id)
-    {
-    	CapsuleTemplate template = this.get(server, id);
-
-        if (template == null)
-        {
+    public CapsuleTemplate getOrCreateTemplate(ResourceLocation templateLocation) {
+        ResourceLocation capsuleTemplateLocation = ResourceLocation.fromNamespaceAndPath(CapsuleMod.MODID, templateLocation.getPath());
+        CapsuleTemplate template = this.getTemplate(capsuleTemplateLocation);
+        if (template == null) {
             template = new CapsuleTemplate();
-            this.templates.put(id.getResourcePath(), template);
+            this.templates.put(capsuleTemplateLocation, template);
         }
 
         return template;
     }
 
     @Nullable
-    public CapsuleTemplate get(@Nullable MinecraftServer server, ResourceLocation templatePath)
-    {
-        String s = templatePath.getResourcePath();
+    public CapsuleTemplate getTemplate(ResourceLocation templateLocation) {
+        ResourceLocation capsuleTemplateLocation = ResourceLocation.fromNamespaceAndPath(CapsuleMod.MODID, templateLocation.getPath());
+        return this.templates.computeIfAbsent(capsuleTemplateLocation, (p_209204_1_) -> {
+            CapsuleTemplate template = this.loadTemplateFile(p_209204_1_, ".schematic");
+            if (template == null) template = this.loadTemplateFile(p_209204_1_, ".nbt");
+            if (template == null) template = this.loadTemplateResource(p_209204_1_, ".schematic");
+            if (template == null) template = this.loadTemplateResource(p_209204_1_, ".nbt");
+            return template;
+        });
+    }
 
-        if (this.templates.containsKey(s))
-        {
-            return (CapsuleTemplate)this.templates.get(s);
+    public void onResourceManagerReload(ResourceManager resourceManager) {
+        this.resourceManager = resourceManager;
+        this.templates.clear();
+    }
+
+    @Nullable
+    private CapsuleTemplate loadTemplateResource(ResourceLocation p_209201_1_, String extension) {
+        ResourceLocation capsuleTemplateLocation = ResourceLocation.fromNamespaceAndPath("capsule", p_209201_1_.getPath() + extension);
+
+        Optional<Resource> optionalTemplate = this.resourceManager.getResource(capsuleTemplateLocation);
+        if (optionalTemplate.isPresent()) {
+            try {
+                CapsuleTemplate template = this.loadTemplate(optionalTemplate.get().open(), ".schematic".equals(extension), capsuleTemplateLocation.toString());
+                return template;
+            } catch (FileNotFoundException var18) {
+                return null;
+            } catch (Throwable throwable) {
+                LOGGER.error("Couldn't load structure {}: {}", capsuleTemplateLocation, throwable.toString());
+                return null;
+            }
         }
-        else
-        {
-            if (server == null)
-            {
-                this.readTemplateFromJar(templatePath);
-            }
-            else
-            {
-                this.readTemplate(templatePath);
-            }
+        return null;
+    }
 
-            return this.templates.containsKey(s) ? (CapsuleTemplate)this.templates.get(s) : null;
+    @Nullable
+    private CapsuleTemplate loadTemplateFile(ResourceLocation locationIn, String extension) {
+        if (!this.pathGenerated.toAbsolutePath().toFile().isDirectory()) {
+            return null;
+        } else {
+            try {
+                Path path = this.resolvePath(locationIn, extension);
+
+                try (InputStream inputstream = new FileInputStream(path.toFile())) {
+                    CapsuleTemplate template = this.loadTemplate(inputstream, ".schematic".equals(extension), path.toString());
+                    return template;
+                } catch (FileNotFoundException var18) {
+                    return null;
+                } catch (IOException ioexception) {
+                    LOGGER.error("Couldn't load structure from {}", path, ioexception);
+                    return null;
+                } catch (Exception exception) {
+                    LOGGER.error("Error while loading {}", path, exception);
+                    return null;
+                }
+            } catch (ResourceLocationException e) {
+                LOGGER.error("Couldn't resolve proper location: {}", locationIn.getPath(), e);
+                return null;
+            }
         }
     }
 
-    /**
-     * This reads a structure template from the given location and stores it.
-     * This first attempts get the template from an external folder.
-     * If it isn't there then it attempts to take it from the minecraft jar.
-     */
-    public boolean readTemplate(ResourceLocation server)
-    {
-        String s = server.getResourcePath();
-        File file1 = new File(this.baseFolder, s + ".nbt");
-
-        if (!file1.exists())
-        {
-            // first try to read from schematic. If not working try from jar
-            return this.readTemplateFromSchematic(server) || this.readTemplateFromJar(server);
+    private CapsuleTemplate loadTemplate(InputStream inputStreamIn, Boolean isSchematic, String location) throws Exception {
+        if (isSchematic) {
+            return readTemplateFromSchematic(inputStreamIn, location);
         }
-        else
-        {
-            InputStream inputstream = null;
-            boolean flag;
-
-            try
-            {
-                inputstream = new FileInputStream(file1);
-                this.readTemplateFromStream(s, inputstream);
-                flag = true;
-            }
-            catch (Throwable var10)
-            {
-                flag = false;
-            }
-            finally
-            {
-                IOUtils.closeQuietly(inputstream);
-            }
-
-            return flag;
-        }
+        CompoundTag compoundnbt = NbtIo.readCompressed(inputStreamIn, NbtAccounter.unlimitedHeap());
+        return this.readFromNBT(compoundnbt, location);
     }
 
-    /**
-     * reads a template from the minecraft jar
-     */
-    private boolean readTemplateFromJar(ResourceLocation id)
-    {
-        String s = id.getResourceDomain();
-        String s1 = id.getResourcePath();
-        InputStream inputstream = null;
-        boolean flag;
-
-        try
-        {
-            LOGGER.info("reading from jar at" + "/" + s1 + ".nbt");
-            inputstream = MinecraftServer.class.getResourceAsStream("/" + s1 + ".nbt");
-            this.readTemplateFromStream(s1, inputstream);
-            flag = true;
-        }
-        catch (Throwable var10)
-        {
-            flag = false;
-        }
-        finally
-        {
-            IOUtils.closeQuietly(inputstream);
-        }
-
-        return flag;
-    }
-
-    /**
-     * reads a template from an inputstream
-     */
-    public void readTemplateFromStream(String id, InputStream stream) throws IOException
-    {
-        NBTTagCompound nbttagcompound = CompressedStreamTools.readCompressed(stream);
-
-        if (!nbttagcompound.hasKey("DataVersion", 99))
-        {
-            nbttagcompound.setInteger("DataVersion", 500);
+    public CapsuleTemplate readFromNBT(CompoundTag p_227458_1_, String location) {
+        if (!p_227458_1_.contains("DataVersion", 99)) {
+            p_227458_1_.putInt("DataVersion", 500);
         }
 
         CapsuleTemplate template = new CapsuleTemplate();
-        template.read(this.fixer.process(FixTypes.STRUCTURE, nbttagcompound));
-        this.templates.put(id, template);
+        template.load(DataFixTypes.STRUCTURE.updateToCurrentVersion(this.fixer, p_227458_1_, p_227458_1_.getInt("DataVersion")), location);
+        return template;
     }
 
-    /**
-     * writes the template to an external folder
-     */
-    public boolean writeTemplate(@Nullable MinecraftServer server, ResourceLocation id)
-    {
-        String s = id.getResourcePath();
+    public boolean writeToFile(ResourceLocation templateName) {
+        ResourceLocation capsuleTemplateLocation = ResourceLocation.fromNamespaceAndPath(CapsuleMod.MODID, templateName.getPath());
+        CapsuleTemplate template = this.templates.get(capsuleTemplateLocation);
+        if (template == null) {
+            return false;
+        } else {
+            Path path = this.resolvePath(capsuleTemplateLocation, ".nbt");
+            Path path1 = path.getParent();
+            if (path1 == null) {
+                return false;
+            } else {
+                try {
+                    Files.createDirectories(Files.exists(path1) ? path1.toRealPath() : path1);
+                } catch (IOException var19) {
+                    LOGGER.error("Failed to create parent directory: {}", path1);
+                    return false;
+                }
 
-        if (server != null && this.templates.containsKey(s))
-        {
-            File file1 = new File(this.baseFolder);
+                CompoundTag compoundnbt = template.save(new CompoundTag());
 
-            if (!file1.exists())
-            {
-                if (!file1.mkdirs())
-                {
+                try (OutputStream outputstream = new FileOutputStream(path.toFile())) {
+                    NbtIo.writeCompressed(compoundnbt, outputstream);
+                    return true;
+                } catch (Throwable var21) {
                     return false;
                 }
             }
-            else if (!file1.isDirectory())
-            {
-                return false;
-            }
-
-            File file2 = new File(file1, s + ".nbt");
-            CapsuleTemplate template = (CapsuleTemplate)this.templates.get(s);
-            OutputStream outputstream = null;
-            boolean flag;
-
-            try
-            {
-                NBTTagCompound nbttagcompound = template.writeToNBT(new NBTTagCompound());
-                outputstream = new FileOutputStream(file2);
-                CompressedStreamTools.writeCompressed(nbttagcompound, outputstream);
-                flag = true;
-            }
-            catch (Throwable var13)
-            {
-                LOGGER.error(var13);
-                flag = false;
-            }
-            finally
-            {
-                IOUtils.closeQuietly(outputstream);
-            }
-
-            return flag;
-        }
-        else
-        {
-            return false;
         }
     }
 
-    public void remove(ResourceLocation templatePath)
-    {
-        this.templates.remove(templatePath.getResourcePath());
-    }
-
-    public boolean readTemplateFromSchematic(ResourceLocation server)
-    {
-        String s = server.getResourcePath();
-        File file1 = new File(this.baseFolder, s + ".schematic");
-
-        if (!file1.exists())
-        {
-            return false;
-        }
-        else
-        {
-            InputStream inputstream = null;
-            boolean flag;
-
-            try
-            {
-                inputstream = new FileInputStream(file1);
-                NBTTagCompound schematicNBT = CompressedStreamTools.readCompressed(inputstream);
-                CapsuleTemplate template = new CapsuleTemplate();
-                template.readSchematic(schematicNBT);
-                this.templates.put(s, template);
-                flag = true;
+    private Path resolvePath(ResourceLocation locationIn, String extIn) {
+        if (locationIn.getPath().contains("//")) {
+            throw new ResourceLocationException("Invalid resource path: " + locationIn);
+        } else {
+            String ext = locationIn.getPath().endsWith(extIn) ? "" : extIn;
+            Path p = this.pathGenerated.toAbsolutePath().resolve(locationIn.getPath() + ext).normalize();
+            if (FileUtil.isPathNormalized(p) && FileUtil.isPathPortable(p)) {
+                return p;
+            } else {
+                throw new ResourceLocationException("Invalid resource path: " + p);
             }
-            catch (Throwable var10)
-            {
-                flag = false;
-            }
-            finally
-            {
-                IOUtils.closeQuietly(inputstream);
-            }
-
-            return flag;
         }
     }
 
-    public boolean deleteTemplate(@Nullable MinecraftServer server, ResourceLocation id) {
-        String s = id.getResourcePath();
+    public void remove(ResourceLocation templateLocation) {
+        ResourceLocation capsuleTemplateLocation = ResourceLocation.fromNamespaceAndPath(CapsuleMod.MODID, templateLocation.getPath());
+        this.templates.remove(capsuleTemplateLocation);
+    }
 
-        if (server != null && this.templates.containsKey(s)) {
-            File file1 = new File(this.baseFolder);
+    public CapsuleTemplate readTemplateFromSchematic(InputStream inputstream, String location) throws Exception {
+            CompoundTag schematicNBT = NbtIo.readCompressed(inputstream, NbtAccounter.unlimitedHeap());
+            CapsuleTemplate template = new CapsuleTemplate();
+            // first raw conversion
+            template.readSchematic(schematicNBT);
+            // second conversion with update of data if needed
+            CompoundTag compoundnbt = template.save(new CompoundTag());
+            return readFromNBT(compoundnbt, location);
+    }
 
-            if (!file1.exists()) {
-                return true;
-            } else if (!file1.isDirectory()) {
-                return true;
-            }
+    public boolean deleteTemplate(ResourceLocation templateLocation) {
+        ResourceLocation capsuleTemplateLocation = ResourceLocation.fromNamespaceAndPath(CapsuleMod.MODID, templateLocation.getPath());
+        if (this.templates.containsKey(capsuleTemplateLocation)) {
+            File file = this.resolvePath(capsuleTemplateLocation, ".nbt").toFile();
 
-            File file2 = new File(file1, s + ".nbt");
-            boolean deleted = file2.delete();
+            boolean deleted = file.delete();
             if (deleted) {
-                remove(id);
+                remove(capsuleTemplateLocation);
             }
             return deleted;
         }

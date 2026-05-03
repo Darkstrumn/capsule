@@ -1,48 +1,33 @@
 package capsule.network;
 
-import io.netty.buffer.ByteBuf;
-import net.minecraft.util.math.BlockPos;
-import net.minecraftforge.fml.common.network.simpleimpl.IMessage;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import capsule.CapsuleMod;
+import net.minecraft.core.BlockPos;
+import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.resources.ResourceLocation;
 
-/**
- * This Network Message is sent from the client to the server
- */
-public class CapsuleUndeployNotifToClient implements IMessage {
+public record CapsuleUndeployNotifToClient(BlockPos posFrom, BlockPos posTo, int size, String templateName) implements CustomPacketPayload {
+    public static final CustomPacketPayload.Type<CapsuleUndeployNotifToClient> TYPE =
+            new CustomPacketPayload.Type<>(ResourceLocation.fromNamespaceAndPath(CapsuleMod.MODID, "undeploy_notif"));
 
-    protected static final Logger LOGGER = LogManager.getLogger(CapsuleUndeployNotifToClient.class);
+    public static final StreamCodec<FriendlyByteBuf, CapsuleUndeployNotifToClient> STREAM_CODEC =
+            StreamCodec.of(CapsuleUndeployNotifToClient::encode, CapsuleUndeployNotifToClient::decode);
 
-    public BlockPos posFrom = null;
-    public BlockPos posTo = null;
-    public int size = 0;
-
-    public CapsuleUndeployNotifToClient(BlockPos posFrom, BlockPos posTo, int size) {
-        this.posFrom = posFrom;
-        this.posTo = posTo;
-        this.size = size;
+    private static CapsuleUndeployNotifToClient decode(FriendlyByteBuf buf) {
+        return new CapsuleUndeployNotifToClient(buf.readBlockPos(), buf.readBlockPos(), buf.readShort(), buf.readUtf());
     }
 
-    // for use by the message handler only.
-    public CapsuleUndeployNotifToClient() {
-    }
-
-    @Override
-    public void fromBytes(ByteBuf buf) {
-        try {
-            this.posFrom = BlockPos.fromLong(buf.readLong());
-            this.posTo = BlockPos.fromLong(buf.readLong());
-            this.size = buf.readShort();
-        } catch (IndexOutOfBoundsException ioe) {
-            LOGGER.error("Exception while reading CapsuleUndeployNotifToClient: " + ioe);
-        }
+    private static void encode(FriendlyByteBuf buf, CapsuleUndeployNotifToClient msg) {
+        buf.writeBlockPos(msg.posFrom);
+        buf.writeBlockPos(msg.posTo);
+        buf.writeShort(msg.size);
+        buf.writeUtf(msg.templateName == null ? "" : msg.templateName);
     }
 
     @Override
-    public void toBytes(ByteBuf buf) {
-        buf.writeLong(posFrom.toLong());
-        buf.writeLong(posTo.toLong());
-        buf.writeShort(size);
+    public CustomPacketPayload.Type<CapsuleUndeployNotifToClient> type() {
+        return TYPE;
     }
 
     @Override

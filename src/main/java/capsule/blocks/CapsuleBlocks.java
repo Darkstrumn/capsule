@@ -1,63 +1,37 @@
 package capsule.blocks;
 
-import capsule.Main;
-import net.minecraft.block.Block;
-import net.minecraft.block.material.Material;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemBlock;
-import net.minecraft.util.ResourceLocation;
-import net.minecraftforge.event.RegistryEvent;
-import net.minecraftforge.fml.common.registry.GameRegistry;
+import capsule.CapsuleMod;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.item.BlockItem;
+import net.minecraft.world.level.block.entity.BlockEntityType;
+import net.neoforged.api.distmarker.Dist;
+import net.neoforged.api.distmarker.OnlyIn;
+import net.neoforged.bus.api.IEventBus;
+import net.neoforged.neoforge.client.event.EntityRenderersEvent;
+import net.neoforged.neoforge.registries.DeferredBlock;
+import net.neoforged.neoforge.registries.DeferredItem;
+import net.neoforged.neoforge.registries.DeferredRegister;
 
-import java.util.Map;
+import java.util.function.Supplier;
 
 public class CapsuleBlocks {
 
-    public static BlockCapsuleMarker blockCapsuleMarker;
-    public final static String CAPSULE_MARKER_REGISTERY_NAME = "capsulemarker";
-    public final static String CAPSULE_MARKER_TE_REGISTERY_NAME = "capsulemarker-te";
+    private static final DeferredRegister.Blocks BLOCKS = DeferredRegister.createBlocks(CapsuleMod.MODID);
+    private static final DeferredRegister.Items BLOCKITEMS = DeferredRegister.createItems(CapsuleMod.MODID);
+    private static final DeferredRegister<BlockEntityType<?>> BLOCK_ENTITIES = DeferredRegister.create(BuiltInRegistries.BLOCK_ENTITY_TYPE, CapsuleMod.MODID);
 
-    // testing blocks
-    public static BlockCaptureCrasher blockCaptureCrasher;
-    public final static String CAPTURE_CRASHER_REGISTERY_NAME = "capturecrasher";
+    public static final DeferredBlock<BlockCapsuleMarker> CAPSULE_MARKER = BLOCKS.register("capsulemarker", BlockCapsuleMarker::new);
+    public static final DeferredItem<BlockItem> CAPSULE_MARKER_ITEM = BLOCKITEMS.registerSimpleBlockItem("capsulemarker", CAPSULE_MARKER);
+    public static final Supplier<BlockEntityType<BlockEntityCapture>> MARKER_TE = BLOCK_ENTITIES.register("capsulemarker_te", () -> BlockEntityType.Builder.of(BlockEntityCapture::new, CAPSULE_MARKER.get()).build(null));
 
-    public static BlockDeployCrasher blockDeployCrasher;
-    public final static String DEPLOY_CRASHER_REGISTERY_NAME = "deploycrasher";
-
-
-    public static void registerBlocks(RegistryEvent.Register<Block> event) {
-
-        blockCapsuleMarker = new BlockCapsuleMarker(CapsuleBlocks.CAPSULE_MARKER_REGISTERY_NAME, Material.ROCK);
-        blockCapsuleMarker.setRegistryName(CapsuleBlocks.CAPSULE_MARKER_REGISTERY_NAME);
-        blockCapsuleMarker.setCreativeTab(Main.tabCapsule);
-
-        event.getRegistry().register(blockCapsuleMarker);
-        GameRegistry.registerTileEntity(TileEntityCapture.class, new ResourceLocation("capsule", CapsuleBlocks.CAPSULE_MARKER_TE_REGISTERY_NAME));
-
-        // testing blocks
-        Map<String, String> env = System.getenv();
-        if ("DEV".equals(env.get("__ENV__"))) {
-            blockCaptureCrasher =  new BlockCaptureCrasher(CapsuleBlocks.CAPTURE_CRASHER_REGISTERY_NAME, Material.ROCK);
-            blockCaptureCrasher.setRegistryName(CapsuleBlocks.CAPTURE_CRASHER_REGISTERY_NAME);
-            blockCaptureCrasher.setCreativeTab(Main.tabCapsule);
-            event.getRegistry().register(blockCaptureCrasher);
-
-            blockDeployCrasher = new BlockDeployCrasher(CapsuleBlocks.DEPLOY_CRASHER_REGISTERY_NAME, Material.ROCK);
-            blockDeployCrasher.setRegistryName(CapsuleBlocks.DEPLOY_CRASHER_REGISTERY_NAME);
-            blockDeployCrasher.setCreativeTab(Main.tabCapsule);
-            event.getRegistry().register(blockDeployCrasher);
-        }
+    public static void registerBlocks(IEventBus modEventBus) {
+        BLOCKS.register(modEventBus);
+        BLOCK_ENTITIES.register(modEventBus);
+        BLOCKITEMS.register(modEventBus);
     }
 
-    @SuppressWarnings("ConstantConditions")
-    public static void registerItemBlocks(RegistryEvent.Register<Item> event) {
-        event.getRegistry().register(new ItemBlock(blockCapsuleMarker).setRegistryName(blockCapsuleMarker.getRegistryName()));
-
-        // testing blocks
-        Map<String, String> env = System.getenv();
-        if ("DEV".equals(env.get("__ENV__"))) {
-            event.getRegistry().register(new ItemBlock(blockCaptureCrasher).setRegistryName(blockCaptureCrasher.getRegistryName()));
-            event.getRegistry().register(new ItemBlock(blockDeployCrasher).setRegistryName(blockDeployCrasher.getRegistryName()));
-        }
+    @OnlyIn(Dist.CLIENT)
+    public static void registerBlockEntitiesRenderer(EntityRenderersEvent.RegisterRenderers event) {
+        event.registerBlockEntityRenderer(MARKER_TE.get(), CaptureBER::new);
     }
 }

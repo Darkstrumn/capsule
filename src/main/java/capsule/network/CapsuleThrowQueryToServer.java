@@ -1,80 +1,49 @@
 package capsule.network;
 
-import io.netty.buffer.ByteBuf;
-import net.minecraft.util.math.BlockPos;
-import net.minecraftforge.fml.common.network.simpleimpl.IMessage;
+import capsule.CapsuleMod;
+import net.minecraft.core.BlockPos;
+import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.resources.ResourceLocation;
 
-/**
- * This Network Message is sent from the client to the server
- */
-public class CapsuleThrowQueryToServer implements IMessage {
+public record CapsuleThrowQueryToServer(boolean instant, BlockPos pos) implements CustomPacketPayload {
+    public static final CustomPacketPayload.Type<CapsuleThrowQueryToServer> TYPE =
+            new CustomPacketPayload.Type<>(ResourceLocation.fromNamespaceAndPath(CapsuleMod.MODID, "throw_query"));
 
-    public BlockPos pos = null;
-    public boolean instant = false;
+    public static final StreamCodec<FriendlyByteBuf, CapsuleThrowQueryToServer> STREAM_CODEC =
+            StreamCodec.of(CapsuleThrowQueryToServer::encode, CapsuleThrowQueryToServer::decode);
 
     public CapsuleThrowQueryToServer(BlockPos pos, boolean instant) {
-        this.pos = pos;
-        this.instant = instant;
+        this(instant, pos);
     }
 
-    // for use by the message handler only.
-    public CapsuleThrowQueryToServer() {
-
-    }
-
-    /**
-     * Called by the network code once it has received the message bytes over
-     * the network. Used to read the ByteBuf contents into your member variables
-     *
-     * @param buf
-     */
-    @Override
-    public void fromBytes(ByteBuf buf) {
-        try {
-            // these methods may also be of use for your code:
-            // for Itemstacks - ByteBufUtils.readItemStack()
-            // for MinecraftNBT tags ByteBufUtils.readTag();
-            // for Strings: ByteBufUtils.readUTF8String();
-            this.instant = buf.readBoolean();
-            boolean hasPos = buf.readBoolean();
-            if (hasPos) {
-                this.pos = BlockPos.fromLong(buf.readLong());
-            }
-
-        } catch (IndexOutOfBoundsException ignored) {
+    private static CapsuleThrowQueryToServer decode(FriendlyByteBuf buf) {
+        boolean instant = buf.readBoolean();
+        boolean hasPos = buf.readBoolean();
+        BlockPos pos = null;
+        if (hasPos) {
+            pos = BlockPos.of(buf.readLong());
         }
+        return new CapsuleThrowQueryToServer(instant, pos);
     }
 
-    /**
-     * Called by the network code. Used to write the contents of your message
-     * member variables into the ByteBuf, ready for transmission over the
-     * network.
-     *
-     * @param buf
-     */
-    @Override
-    public void toBytes(ByteBuf buf) {
-
-        // these methods may also be of use for your code:
-        // for Itemstacks - ByteBufUtils.writeItemStack()
-        // for MinecraftNBT tags ByteBufUtils.writeTag();
-        // for Strings: ByteBufUtils.writeUTF8String();
-        buf.writeBoolean(this.instant);
-        boolean hasPos = this.pos != null;
+    private static void encode(FriendlyByteBuf buf, CapsuleThrowQueryToServer msg) {
+        buf.writeBoolean(msg.instant);
+        boolean hasPos = msg.pos != null;
         buf.writeBoolean(hasPos);
         if (hasPos) {
-            buf.writeLong(this.pos.toLong());
+            buf.writeLong(msg.pos.asLong());
         }
-
     }
 
-    public boolean isMessageValid() {
-        return true;
+    @Override
+    public CustomPacketPayload.Type<CapsuleThrowQueryToServer> type() {
+        return TYPE;
     }
 
     @Override
     public String toString() {
         return getClass().toString();
     }
-
 }

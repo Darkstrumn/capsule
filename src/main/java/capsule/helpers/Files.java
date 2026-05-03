@@ -1,23 +1,32 @@
 package capsule.helpers;
 
-import capsule.loot.LootPathData;
-import com.google.gson.*;
-import net.minecraft.util.JsonUtils;
-import net.minecraft.util.StringUtils;
+import capsule.Config;
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.packs.resources.Resource;
+import net.minecraft.server.packs.resources.ResourceManager;
+import net.minecraft.util.GsonHelper;
+import net.minecraft.util.StringUtil;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-import java.io.*;
-import java.net.URISyntaxException;
-import java.net.URL;
-import java.net.URLDecoder;
-import java.nio.charset.StandardCharsets;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.nio.file.Path;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.Map;
 import java.util.function.Consumer;
-import java.util.jar.JarEntry;
-import java.util.jar.JarFile;
 
+@SuppressWarnings("ResultOfMethodCallIgnored")
 public class Files {
 
     protected static final Logger LOGGER = LogManager.getLogger(Files.class);
@@ -26,7 +35,7 @@ public class Files {
     public static JsonObject readJSON(File file) {
         if (file.exists()) {
             try (final InputStream stream = new FileInputStream(file)) {
-                JsonObject jsonContent = JsonUtils.fromJson(GSON, new InputStreamReader(stream), JsonObject.class);
+                JsonObject jsonContent = GsonHelper.fromJson(GSON, new InputStreamReader(stream), JsonObject.class);
                 return jsonContent;
             } catch (IOException e) {
                 e.printStackTrace();
@@ -44,7 +53,7 @@ public class Files {
         }
     }
 
-    public static HashMap<String, JsonObject> populateWhitelistConfig(File capsuleConfigDir) {
+    public static HashMap<String, JsonObject> populateWhitelistConfig(File capsuleConfigDir, ResourceManager ressourceManager) {
         if (!capsuleConfigDir.exists()) {
             capsuleConfigDir.mkdirs();
         }
@@ -53,11 +62,11 @@ public class Files {
             File whitelistFile = new File(capsuleConfigDir, "blueprint_whitelist.json");
             if (!whitelistFile.exists()) {
                 LOGGER.info("First load: initializing the configs in " + capsuleConfigDir.getPath() + ".");
-                Files.populateFolder(capsuleConfigDir, "assets/capsule/config");
+                Files.populateFolder(capsuleConfigDir, "initialconfig/root", ressourceManager);
             }
             if (whitelistFile.exists()) {
                 try (final InputStream stream = new FileInputStream(whitelistFile)) {
-                    JsonArray whitelistElements = JsonUtils.fromJson(GSON, new InputStreamReader(stream), JsonArray.class);
+                    JsonArray whitelistElements = GsonHelper.fromJson(GSON, new InputStreamReader(stream), JsonArray.class);
                     if (whitelistElements != null)
                         for (JsonElement elem : whitelistElements) {
                             if (elem.isJsonPrimitive()) {
@@ -80,103 +89,93 @@ public class Files {
         return blueprintWhitelist;
     }
 
-    public static ArrayList<String> populateStarters(File capsuleConfigDir, String starterTemplatesPath) {
-        if (StringUtils.isNullOrEmpty(starterTemplatesPath)) return new ArrayList<>();
+    public static ArrayList<String> populateStarters(File capsuleConfigDir, String starterTemplatesPath, ResourceManager ressourceManager) {
+        if (StringUtil.isNullOrEmpty(starterTemplatesPath)) return new ArrayList<>();
         File startersFolder = new File(capsuleConfigDir.getParentFile().getParentFile(), starterTemplatesPath);
 
         if (!startersFolder.exists()) {
             startersFolder.mkdirs();
             // initial with example capsule the first time
             LOGGER.info("First load: initializing the starters in " + starterTemplatesPath + ". You can change the content of folder with any nbt structure block, schematic or capsule file, or empty it for no starter capsule.");
-            Files.populateFolder(startersFolder, "assets/capsule/starters");
+            Files.populateFolder(startersFolder, "initialconfig/starters", ressourceManager);
         }
         ArrayList<String> starterTemplatesList = new ArrayList<>();
-        iterateTemplates(startersFolder, templateName -> {
-            starterTemplatesList.add(starterTemplatesPath + "/" + templateName);
-        });
+        iterateTemplates(startersFolder, templateName -> starterTemplatesList.add(starterTemplatesPath + "/" + templateName));
         return starterTemplatesList;
     }
 
-    public static void populateAndLoadLootList(File capsuleConfigDir, String[] lootTemplatesPaths, Map<String, LootPathData> outLootTemplatesData) {
+    public static void populateAndLoadLootList(File capsuleConfigDir, Map<String, Config.LootPathData> lootTemplatesData, ResourceManager ressourceManager) {
         // Init the manager for reward Lists
-        for (String path : lootTemplatesPaths) {
-            LootPathData data = outLootTemplatesData.get(path);
-
-            File templateFolder = new File(capsuleConfigDir.getParentFile().getParentFile(), path);
+        for (Config.LootPathData data : lootTemplatesData.values()) {
+            File templateFolder = new File(capsuleConfigDir.getParentFile().getParentFile(), data.path);
 
             if (!templateFolder.exists()) {
                 templateFolder.mkdirs();
                 // initial with example capsule the first time
-                LOGGER.info("First load: initializing the loots in " + path + ". You can change the content of folder with any nbt structure block, schematic, or capsule file. You can remove the folders from capsule.config to remove loots.");
-                String assetPath = "assets/capsule/loot/common";
-                if (templateFolder.getPath().contains("uncommon")) assetPath = "assets/capsule/loot/uncommon";
-                if (templateFolder.getPath().contains("rare")) assetPath = "assets/capsule/loot/rare";
-                populateFolder(templateFolder, assetPath);
+                LOGGER.info("First load: initializing the loots in " + data.path + ". You can change the content of folder with any nbt structure block, schematic, or capsule file. You can remove the folders from capsule.config to remove loots.");
+                String assetPath = null;
+                if (templateFolder.getPath().contains(File.separatorChar + "uncommon"))
+                    assetPath = "initialconfig/loot/uncommon";
+                if (templateFolder.getPath().contains(File.separatorChar + "rare"))
+                    assetPath = "initialconfig/loot/rare";
+                if (templateFolder.getPath().contains(File.separatorChar + "common"))
+                    assetPath = "initialconfig/loot/common";
+                if (assetPath != null) populateFolder(templateFolder, assetPath, ressourceManager);
             }
 
             data.files = new ArrayList<>();
-            iterateTemplates(templateFolder, templateName -> {
-                data.files.add(templateName);
-            });
+            iterateTemplates(templateFolder, templateName -> data.files.add(templateName));
         }
     }
 
-    public static ArrayList<String> populatePrefabs(File capsuleConfigDir, String prefabsTemplatesPath) {
+    public static ArrayList<String> populatePrefabs(File capsuleConfigDir, String prefabsTemplatesPath, ResourceManager ressourceManager) {
         File prefabsFolder = new File(capsuleConfigDir.getParentFile().getParentFile(), prefabsTemplatesPath);
 
         if (!prefabsFolder.exists()) {
             prefabsFolder.mkdirs();
             // initial with example capsule the first time
             LOGGER.info("First load: initializing the prefabs in " + prefabsTemplatesPath + ". You can change the content of folder with any nbt structure block, schematic or capsule file, or empty it for no blueprint prefabs recipes.");
-            Files.populateFolder(prefabsFolder, "assets/capsule/prefabs");
+            Files.populateFolder(prefabsFolder, "initialconfig/prefabs", ressourceManager);
         }
         ArrayList<String> prefabsTemplatesList = new ArrayList<>();
-        iterateTemplates(prefabsFolder, templateName -> {
-            prefabsTemplatesList.add(prefabsTemplatesPath + "/" + templateName);
-        });
+        iterateTemplates(prefabsFolder, templateName -> prefabsTemplatesList.add(prefabsTemplatesPath + "/" + templateName));
+        LOGGER.info(prefabsTemplatesList.size() + " prefab capsules loaded.");
         return prefabsTemplatesList;
     }
 
-    public static void populateFolder(File templateFolder, String assetPath) {
+    public static void populateFolder(File templateFolder, String assetPath, ResourceManager ressourceManager) {
         try {
-            // source path
-            String[] resources = getResourceListing(Files.class, assetPath);
-            for (String ressource : resources) {
-                if (!ressource.isEmpty()) {
-                    InputStream sourceTemplate = Files.class.getClassLoader().getResourceAsStream(assetPath + "/" + ressource);
-                    if (sourceTemplate == null) {
-                        LOGGER.error("asset " + assetPath + "/" + ressource + "couldn't be loaded");
-                        break;
+            for (Map.Entry<ResourceLocation, Resource> ressourceLoc : ressourceManager.listResources(assetPath, s -> s.getPath().endsWith(".nbt") || s.getPath().endsWith(".json") || s.getPath().endsWith(".schematic")).entrySet()) {
+                Resource resource = ressourceLoc.getValue();
+                // source path
+                String sourcePath = ressourceLoc.getKey().getPath();
+                String fileName = sourcePath.replace(assetPath + "/", "");
+                Path assetFile = templateFolder.toPath().resolve(fileName);
+                LOGGER.debug("copying asset " + assetPath + "/" + fileName + " to " + assetFile.toString());
+                try (InputStream sourceTemplate = resource.open()) {
+                    File assetAsFile = assetFile.toFile();
+                    if (assetAsFile.isDirectory()) {
+                        if (!assetAsFile.exists()) assetAsFile.mkdirs();
+                        populateFolder(assetAsFile, assetPath + "/" + fileName, ressourceManager);
+                    } else {
+                        File parentFolder = assetFile.getParent().toFile();
+                        if (!parentFolder.exists()) parentFolder.mkdirs();
+                        java.nio.file.Files.copy(sourceTemplate, assetFile);
                     }
-                    Path assetFile = templateFolder.toPath().resolve(ressource.toLowerCase());
-                    LOGGER.debug("copying asset " + assetPath + "/" + ressource + " to " + assetFile.toString());
-                    try {
-                        if (ressource.contains(".")) {
-                            // assume file
-                            java.nio.file.Files.copy(sourceTemplate, assetFile);
-                        } else {
-                            // assume directory
-                            File assetFileDirectory = assetFile.toFile();
-                            if (!assetFileDirectory.exists()) assetFileDirectory.mkdirs();
-                            populateFolder(assetFileDirectory, assetPath + "/" + ressource);
-                        }
-                    } catch (Exception e) {
-                        LOGGER.error(e);
-                    }
+                } catch (Exception e) {
+                    LOGGER.error(e);
                 }
-            }
 
+            }
         } catch (Exception e) {
-            LOGGER.error("Error while copying initial capsule templates, there will be no loots!", e);
+            LOGGER.error("Error while copying initial capsule templates, there will be no loots, prefabs or starters!", e);
         }
     }
 
-
     public static void iterateTemplates(File templateFolder, Consumer<String> onTemplateFound) {
         if (templateFolder.exists() && templateFolder.isDirectory()) {
-            Iterator<Path> iterator = null;
-            try {
-                iterator = java.nio.file.Files.walk(templateFolder.toPath()).iterator();
+            try (java.util.stream.Stream<Path> walkStream = java.nio.file.Files.walk(templateFolder.toPath())) {
+                Iterator<Path> iterator = walkStream.iterator();
                 while (iterator.hasNext()) {
                     Path path = iterator.next();
                     File file = path.toFile();
@@ -189,76 +188,5 @@ public class Files {
                 e.printStackTrace();
             }
         }
-
     }
-
-    /**
-     * List directory contents for a resource folder. Not recursive.
-     * This is basically a brute-force implementation.
-     * Works for regular files and also JARs.
-     *
-     * @param clazz Any java class that lives in the same place as the resources you want.
-     * @param path  Should end with "/", but not start with one.
-     * @return Just the name of each member item, not the full paths.
-     * @author Greg Briggs
-     */
-    public static String[] getResourceListing(Class<?> clazz, String path) throws
-            URISyntaxException, IOException {
-        URL dirURL = clazz.getClassLoader().getResource(path);
-
-        if (dirURL != null && dirURL.getProtocol().equals("file")) {
-            /* A file path: easy enough */
-            return new File(dirURL.toURI()).list();
-        }
-
-        if (dirURL == null) {
-            /*
-             * In case of a jar file, we can't actually find a directory. Have
-             * to assume the same jar as clazz.
-             */
-            String me = clazz.getName().replace(".", "/") + ".class";
-            dirURL = clazz.getClassLoader().getResource(me);
-        }
-
-        if (dirURL != null && dirURL.getProtocol().equals("jar")) {
-            /* A JAR path */
-            String jarPath = dirURL.getPath().substring(5, dirURL.getPath().indexOf("!")); //strip out only the JAR file
-            JarFile jar = new JarFile(URLDecoder.decode(jarPath, "UTF-8"));
-
-            LOGGER.debug("Listing files in " + jarPath);
-
-            Enumeration<JarEntry> entries = jar.entries(); //gives ALL entries in jar
-            Set<String> result = new HashSet<>(); //avoid duplicates in case it is a subdirectory
-            while (entries.hasMoreElements()) {
-                String name = entries.nextElement().getName();
-                if (name.startsWith(path)) { //filter according to the path
-                    LOGGER.debug("Found in jar " + name);
-                    String entry = name.replace(path + "/", "");
-                    LOGGER.debug("Keeping " + entry);
-                    result.add(entry);
-                }
-            }
-            jar.close();
-            return result.toArray(new String[0]);
-
-        } else {
-
-            InputStream inputstream = clazz.getResourceAsStream("/" + path);
-            if (inputstream != null) {
-                final InputStreamReader isr = new InputStreamReader(inputstream, StandardCharsets.UTF_8);
-                final BufferedReader br = new BufferedReader(isr);
-
-                Set<String> result = new HashSet<>(); //avoid duplicates in case it is a subdirectory
-                String filename = null;
-                while ((filename = br.readLine()) != null) {
-                    result.add(filename);
-                }
-                return result.toArray(new String[0]);
-            }
-
-        }
-
-        throw new UnsupportedOperationException("Cannot list files for URL " + dirURL);
-    }
-
 }

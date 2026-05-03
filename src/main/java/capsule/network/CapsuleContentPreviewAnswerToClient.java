@@ -1,10 +1,13 @@
 package capsule.network;
 
-import io.netty.buffer.ByteBuf;
-import net.minecraft.util.math.AxisAlignedBB;
-import net.minecraft.util.math.BlockPos;
-import net.minecraftforge.fml.common.network.ByteBufUtils;
-import net.minecraftforge.fml.common.network.simpleimpl.IMessage;
+import capsule.CapsuleMod;
+import net.minecraft.core.BlockPos;
+import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -12,97 +15,60 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * This Network Message is sent from the client to the server
+ * This Network Message is sent from the server to the client
  */
-public class CapsuleContentPreviewAnswerToClient implements IMessage {
+public record CapsuleContentPreviewAnswerToClient(String structureName, List<AABB> boundingBoxes) implements CustomPacketPayload {
+    public static final CustomPacketPayload.Type<CapsuleContentPreviewAnswerToClient> TYPE =
+            new CustomPacketPayload.Type<>(ResourceLocation.fromNamespaceAndPath(CapsuleMod.MODID, "content_preview_answer"));
 
     protected static final Logger LOGGER = LogManager.getLogger(CapsuleContentPreviewAnswerToClient.class);
 
-    private List<AxisAlignedBB> boundingBoxes = null;
-    private String structureName = null;
+    public static final StreamCodec<FriendlyByteBuf, CapsuleContentPreviewAnswerToClient> STREAM_CODEC =
+            StreamCodec.of(CapsuleContentPreviewAnswerToClient::encode, CapsuleContentPreviewAnswerToClient::decode);
 
-
-    public CapsuleContentPreviewAnswerToClient(List<AxisAlignedBB> boundingBoxes, String structureName) {
-        this.boundingBoxes = boundingBoxes;
-        this.structureName = structureName;
+    public CapsuleContentPreviewAnswerToClient(List<AABB> boundingBoxes, String structureName) {
+        this(structureName, boundingBoxes);
     }
 
-    // for use by the message handler only.
-    public CapsuleContentPreviewAnswerToClient() {
-
-    }
-
-    /**
-     * Called by the network code once it has received the message bytes over
-     * the network. Used to read the ByteBuf contents into your member variables
-     *
-     * @param buf buffer content to read from
-     */
-    @Override
-    public void fromBytes(ByteBuf buf) {
-        try {
-            // these methods may also be of use for your code:
-            // for Itemstacks - ByteBufUtils.readItemStack()
-            // for MinecraftNBT tags ByteBufUtils.readTag();
-            // for Strings: ByteBufUtils.readUTF8String();
-            this.structureName = ByteBufUtils.readUTF8String(buf);
-            int size = buf.readShort();
-            this.boundingBoxes = new ArrayList<>(size);
-            for (int i = 0; i < size; i++) {
-                boolean isSingleBlock = buf.readBoolean();
-                if (isSingleBlock) {
-                    BlockPos p = BlockPos.fromLong(buf.readLong());
-                    this.boundingBoxes.add(new AxisAlignedBB(p, p));
-                } else {
-                    this.boundingBoxes.add(new AxisAlignedBB(BlockPos.fromLong(buf.readLong()), BlockPos.fromLong(buf.readLong())));
-                }
+    private static CapsuleContentPreviewAnswerToClient decode(FriendlyByteBuf buf) {
+        String structureName = buf.readUtf();
+        int size = buf.readShort();
+        List<AABB> list = new ArrayList<>(size);
+        for (int i = 0; i < size; i++) {
+            boolean isSingleBlock = buf.readBoolean();
+            if (isSingleBlock) {
+                BlockPos p = BlockPos.of(buf.readLong());
+                list.add(new AABB(p));
+            } else {
+                list.add(new AABB(Vec3.atLowerCornerOf(BlockPos.of(buf.readLong())), Vec3.atLowerCornerOf(BlockPos.of(buf.readLong()))));
             }
-
-        } catch (IndexOutOfBoundsException ioe) {
-            LOGGER.error("Exception while reading CapsuleContentPreviewMessageToClient: " + ioe);
-            return;
         }
+        return new CapsuleContentPreviewAnswerToClient(structureName, list);
     }
 
-    /**
-     * Called by the network code. Used to write the contents of your message
-     * member variables into the ByteBuf, ready for transmission over the
-     * network.
-     *
-     * @param buf buffer content to write into
-     */
-    @Override
-    public void toBytes(ByteBuf buf) {
-
-        // these methods may also be of use for your code:
-        // for Itemstacks - ByteBufUtils.writeItemStack()
-        // for MinecraftNBT tags ByteBufUtils.writeTag();
-        // for Strings: ByteBufUtils.writeUTF8String();
-        ByteBufUtils.writeUTF8String(buf, this.structureName);
-        int size = Math.min(this.boundingBoxes.size(), Short.MAX_VALUE);
+    private static void encode(FriendlyByteBuf buf, CapsuleContentPreviewAnswerToClient msg) {
+        buf.writeUtf(msg.structureName);
+        int size = Math.min(msg.boundingBoxes.size(), Short.MAX_VALUE);
         buf.writeShort(size);
         for (int i = 0; i < size; i++) {
-            AxisAlignedBB bb = boundingBoxes.get(i);
-            boolean isSingleBlock = bb.getAverageEdgeLength() == 0;
+            AABB bb = msg.boundingBoxes.get(i);
+            boolean isSingleBlock = bb.getSize() == 0;
             buf.writeBoolean(isSingleBlock);
-            buf.writeLong(new BlockPos(bb.minX, bb.minY, bb.minZ).toLong());
+            buf.writeLong(BlockPos.containing(bb.minX, bb.minY, bb.minZ).asLong());
             if (!isSingleBlock) {
-                buf.writeLong(new BlockPos(bb.maxX, bb.maxY, bb.maxZ).toLong());
+                buf.writeLong(BlockPos.containing(bb.maxX, bb.maxY, bb.maxZ).asLong());
             }
         }
+    }
+
+    @Override
+    public CustomPacketPayload.Type<CapsuleContentPreviewAnswerToClient> type() {
+        return TYPE;
     }
 
     @Override
     public String toString() {
         return getClass().toString();
-    }
-
-    public List<AxisAlignedBB> getBoundingBoxes() {
-        return boundingBoxes;
-    }
-
-    public String getStructureName() {
-        return structureName;
     }
 
 }

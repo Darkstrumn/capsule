@@ -1,0 +1,17 @@
+{
+  "replace": false,
+  "values": [
+    {
+      "id": "#c:relocation_not_supported",
+      "required": false
+    },
+    {
+      "id": "#c:immovable",
+      "required": false
+    },
+    {
+      "id": "#tombstone:player_graves",
+      "required": false
+    }
+  ]
+}
